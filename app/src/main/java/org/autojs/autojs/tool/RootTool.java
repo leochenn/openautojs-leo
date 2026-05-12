@@ -1,7 +1,6 @@
 package org.autojs.autojs.tool;
 
 import com.stardust.autojs.core.util.ProcessShell;
-import com.stericson.RootShell.RootShell;
 
 /**
  * Created by Stardust on 2018/1/26.
@@ -10,12 +9,7 @@ import com.stericson.RootShell.RootShell;
 public class RootTool {
 
     public static boolean isRootAvailable() {
-        try {
-            return RootShell.isRootAvailable();
-        } catch (Exception e) {
-            e.printStackTrace();
-            return false;
-        }
+        return false;
     }
 
     private static final String cmd = "enabled=$(settings get system pointer_location)\n" +

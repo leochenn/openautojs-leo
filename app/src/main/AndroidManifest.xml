@@ -443,6 +443,9 @@
         <activity
             android:name="org.autojs.autojs.ui.settings.SettingsActivity_"
             android:theme="@style/AppTheme.Settings" />
+        <activity
+            android:name="org.autojs.autojs.ui.settings.InputMethodGuideActivity"
+            android:theme="@style/AppTheme.Settings" />
         <activity android:name="org.autojs.autojs.ui.error.ErrorReportActivity" />
         <activity
             android:name="org.autojs.autojs.external.tasker.TaskerScriptEditActivity_"
@@ -484,6 +487,18 @@
 
         <service android:name="org.autojs.autojs.external.foreground.ForegroundService" />
         <service android:name="org.autojs.autojs.external.ScriptExecutionIntentService" />
+        <service
+            android:name="org.autojs.autojs.external.inputmethod.CaptchaNumberInputMethodService"
+            android:exported="true"
+            android:label="@string/captcha_input_method_name"
+            android:permission="android.permission.BIND_INPUT_METHOD">
+            <intent-filter>
+                <action android:name="android.view.InputMethod" />
+            </intent-filter>
+            <meta-data
+                android:name="android.view.im"
+                android:resource="@xml/captcha_number_input_method" />
+        </service>
 
         <activity android:name="org.autojs.autojs.external.tasker.TaskPrefEditActivity_" />
         <activity android:name="org.autojs.autojs.ui.log.LogActivity_"/>
@@ -575,6 +590,13 @@
             <!-- this Intent filter allows the plug-in to discovered by the host. -->
             <intent-filter>
                 <action android:name="com.twofortyfouram.locale.intent.action.FIRE_SETTING" />
+            </intent-filter>
+        </receiver>
+        <receiver
+            android:name="org.autojs.autojs.external.inputmethod.CaptchaAnswerReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="org.openautojs.autojs.action.CAPTCHA_IME_SET_ANSWER" />
             </intent-filter>
         </receiver>
 

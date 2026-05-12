@@ -2,6 +2,12 @@
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
                   android:widgetLayout="@layout/preference_custom">
 
+    <Preference
+        android:key="@string/key_captcha_input_method"
+        android:layout="@layout/preference_custom"
+        android:summary="@string/summary_captcha_input_method"
+        android:title="@string/text_captcha_input_method" />
+
     <PreferenceCategory
         android:layout="@layout/preference_category_custom"
         android:title="@string/text_script_record"

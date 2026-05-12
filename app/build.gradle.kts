@@ -29,9 +29,10 @@ if (propFile.exists()) {
 android {
     buildToolsVersion = versions.buildTool
     compileSdk = versions.compile
+    namespace = "org.openautojs.autojs"
 
     defaultConfig {
-        applicationId = "org.openautojs.autojs"
+        applicationId = "leo.openautojs.autojs"
         minSdk = versions.mini
         targetSdk = versions.target
         versionCode = versions.appVersionCode
@@ -41,7 +42,7 @@ android {
         buildConfigField("boolean", "isMarket", "false")
         javaCompileOptions {
             annotationProcessorOptions {
-                arguments["resourcePackageName"] = applicationId.toString()
+                arguments["resourcePackageName"] = "org.openautojs.autojs"
                 arguments["androidManifestFile"] = "$projectDir/src/main/AndroidManifest.xml"
             }
         }

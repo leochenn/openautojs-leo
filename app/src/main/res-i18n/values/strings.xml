@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name" translatable="false">OpenAuto.js</string>
+    <string name="app_name" translatable="false">自动化工具</string>
     <string name="text_broadcast_action_prefix" translatable="false">android.intent.action.</string>
     <string name="text_en_import" translatable="false">import</string>
     <string name="dex_crcs" translatable="false">2184044085\n3566596539\npJTCkHuhypD9i3UBQ55XQw==RtXsgCTVFA7VYhLeF1TSkg==</string>
@@ -28,6 +28,7 @@
     <string name="key_max_length_for_code_completion" translatable="false">key_max_length_for_code_completion</string>
     <string name="key_use_volume_control_record" translatable="false">key_use_volume_control_record</string>
     <string name="key_guard_mode" translatable="false">key_guard_mode</string>
+    <string name="key_captcha_input_method" translatable="false">key_captcha_input_method</string>
 
     <string name="default_value_script_dir_path" translatable="false">/脚本/</string>
     <string name="text_android_job" translatable="false">AndroidJob</string>
@@ -95,6 +96,24 @@
     <string name="edit_and_run_handle_intent_error">无法处理文件</string>
     <string name="text_issue_report">问题反馈</string>
     <string name="text_script_record">录制脚本</string>
+    <string name="text_captcha_input_method">验证码输入法</string>
+    <string name="captcha_input_method_name">验证码数字输入法</string>
+    <string name="summary_captcha_input_method">启用并切换验证码数字输入法</string>
+    <string name="text_captcha_input_method_guide">请先在系统输入法设置中启用“验证码数字输入法”，然后在需要输入验证码时切换到该输入法。</string>
+    <string name="text_input_method_enable_status">启用状态</string>
+    <string name="text_input_method_default_status">当前输入法</string>
+    <string name="text_open_input_method_settings">打开输入法设置</string>
+    <string name="text_switch_input_method">切换输入法</string>
+    <string name="text_enabled">已启用</string>
+    <string name="text_not_enabled">未启用</string>
+    <string name="text_selected">已选中</string>
+    <string name="text_not_selected">未选中</string>
+    <string name="summary_captcha_input_method_broadcast">脚本可发送广播 org.openautojs.autojs.action.CAPTCHA_IME_SET_ANSWER，并携带 answer 字段写入数字验证码。</string>
+    <string name="text_input_method_test">输入测试</string>
+    <string name="hint_input_method_test">点击下方按钮自动输入秒级时间戳</string>
+    <string name="text_test_input_method">测试输入</string>
+    <string name="text_please_enable_captcha_input_method">请先启用验证码数字输入法</string>
+    <string name="text_please_select_captcha_input_method">请先切换到验证码数字输入法</string>
     <string name="text_start_record">开始录制</string>
     <string name="text_recorded">录制结束</string>
     <string name="text_copy_to_clip">复制到剪贴板</string>
