@@ -25,6 +25,8 @@ import com.stardust.pio.PFiles;
 
 import org.openautojs.autojs.R;
 import org.autojs.autojs.model.explorer.Explorer;
+import org.autojs.autojs.model.explorer.ExplorerAutomationScriptItem;
+import org.autojs.autojs.model.explorer.ExplorerAutomationScriptPage;
 import org.autojs.autojs.model.explorer.ExplorerChangeEvent;
 import org.autojs.autojs.model.explorer.ExplorerDirPage;
 import org.autojs.autojs.model.explorer.ExplorerFileItem;
@@ -369,11 +371,13 @@ public class ExplorerView extends ThemeColorSwipeRefreshLayout implements SwipeR
                 sort(ExplorerItemList.SORT_TYPE_SIZE, mDirSortMenuShowing);
                 break;
             case R.id.reset:
-                Explorers.Providers.workspace().resetSample(mSelectedItem.toScriptFile())
-                        .observeOn(AndroidSchedulers.mainThread())
-                        .subscribe(ignored -> {
-                            Snackbar.make(this, R.string.text_reset_succeed, Snackbar.LENGTH_SHORT).show();
-                        }, Observers.toastMessage());
+                Observable<ScriptFile> resetTask = Explorers.Providers.workspace().resetBuiltInScript(mSelectedItem.toScriptFile());
+                if (resetTask != null) {
+                    resetTask.observeOn(AndroidSchedulers.mainThread())
+                            .subscribe(ignored -> {
+                                Snackbar.make(this, R.string.text_reset_succeed, Snackbar.LENGTH_SHORT).show();
+                            }, Observers.toastMessage());
+                }
                 break;
             default:
                 return false;
@@ -576,7 +580,7 @@ public class ExplorerView extends ThemeColorSwipeRefreshLayout implements SwipeR
             if (!mExplorerItem.canRename()) {
                 menu.removeItem(R.id.rename);
             }
-            if (!(mExplorerItem instanceof ExplorerSampleItem)) {
+            if (!(mExplorerItem instanceof ExplorerSampleItem) && !(mExplorerItem instanceof ExplorerAutomationScriptItem)) {
                 menu.removeItem(R.id.reset);
             }
             popupMenu.setOnMenuItemClickListener(ExplorerView.this);
@@ -606,7 +610,7 @@ public class ExplorerView extends ThemeColorSwipeRefreshLayout implements SwipeR
         public void bind(ExplorerPage data, int position) {
             mName.setText(ExplorerViewHelper.getDisplayName(data));
             mIcon.setImageResource(ExplorerViewHelper.getIcon(data));
-            mOptions.setVisibility(data instanceof ExplorerSamplePage ? GONE : VISIBLE);
+            mOptions.setVisibility(data instanceof ExplorerSamplePage || data instanceof ExplorerAutomationScriptPage ? GONE : VISIBLE);
             mExplorerPage = data;
 
         }

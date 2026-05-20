@@ -6,6 +6,7 @@ import com.stardust.app.GlobalAppContext;
 import com.stardust.pio.PFiles;
 
 import org.openautojs.autojs.R;
+import org.autojs.autojs.model.explorer.ExplorerAutomationScriptPage;
 import org.autojs.autojs.model.explorer.ExplorerFileItem;
 import org.autojs.autojs.model.explorer.ExplorerItem;
 import org.autojs.autojs.model.explorer.ExplorerPage;
@@ -22,6 +23,9 @@ public class ExplorerViewHelper {
     public static String getDisplayName(ExplorerItem item) {
         if (item instanceof ExplorerSamplePage && ((ExplorerSamplePage) item).isRoot()) {
             return GlobalAppContext.getString(R.string.text_sample);
+        }
+        if (item instanceof ExplorerAutomationScriptPage && ((ExplorerAutomationScriptPage) item).isRoot()) {
+            return GlobalAppContext.getString(R.string.text_automation_scripts);
         }
         if (item instanceof ExplorerPage) {
             return item.getName();
@@ -60,7 +64,7 @@ public class ExplorerViewHelper {
     }
 
     public static int getIcon(ExplorerPage page) {
-        if (page instanceof ExplorerSamplePage) {
+        if (page instanceof ExplorerSamplePage || page instanceof ExplorerAutomationScriptPage) {
             return R.drawable.ic_sample_dir;
         }
         if(page instanceof ExplorerProjectPage){

@@ -22,8 +22,10 @@ import io.reactivex.schedulers.Schedulers;
 public class WorkspaceFileProvider extends ExplorerFileProvider {
 
     private static final String SAMPLE_PATH = "sample";
+    private static final String AUTOMATION_SCRIPTS_PATH = "automation_scripts";
 
     private final PFile mSampleDir;
+    private final PFile mAutomationScriptsDir;
     private final AssetManager mAssetManager;
     private final Context mContext;
 
@@ -32,6 +34,7 @@ public class WorkspaceFileProvider extends ExplorerFileProvider {
         mContext = context;
         mAssetManager = context.getAssets();
         mSampleDir = new PFile(context.getFilesDir(), SAMPLE_PATH);
+        mAutomationScriptsDir = new PFile(context.getFilesDir(), AUTOMATION_SCRIPTS_PATH);
     }
 
     @Override
@@ -48,12 +51,16 @@ public class WorkspaceFileProvider extends ExplorerFileProvider {
                         }
                         if (inSampleDir(file)) {
                             p.addChild(new ExplorerSamplePage(file, p));
+                        } else if (inAutomationScriptsDir(file)) {
+                            p.addChild(new ExplorerAutomationScriptPage(file, p));
                         } else {
                             p.addChild(new ExplorerDirPage(file, p));
                         }
                     } else {
                         if (file.getPath().startsWith(mSampleDir.getPath())) {
                             p.addChild(new ExplorerSampleItem(file, p));
+                        } else if (file.getPath().startsWith(mAutomationScriptsDir.getPath())) {
+                            p.addChild(new ExplorerAutomationScriptItem(file, p));
                         } else {
                             p.addChild(new ExplorerFileItem(file, p));
                         }
@@ -66,22 +73,36 @@ public class WorkspaceFileProvider extends ExplorerFileProvider {
         return file.getPath().startsWith(mSampleDir.getPath());
     }
 
+    private boolean inAutomationScriptsDir(PFile file) {
+        return file.getPath().startsWith(mAutomationScriptsDir.getPath());
+    }
+
     @Override
     protected Observable<PFile> listFiles(PFile directory) {
         if (inSampleDir(directory)) {
-            return listSamples(directory);
+            return listAssetBackedFiles(directory, mSampleDir, SAMPLE_PATH);
+        }
+        if (inAutomationScriptsDir(directory)) {
+            return listAutomationScripts(directory);
         }
         return super.listFiles(directory);
     }
 
-    private Observable<PFile> listSamples(PFile directory) {
-        String pathOfSample;
-        if (directory.getPath().length() <= mSampleDir.getPath().length() + 1) {
-            pathOfSample = "";
+    private Observable<PFile> listAutomationScripts(PFile directory) {
+        return Observable.defer(() -> {
+            copyAssetDir(AUTOMATION_SCRIPTS_PATH, mAutomationScriptsDir, false);
+            return super.listFiles(directory);
+        });
+    }
+
+    private Observable<PFile> listAssetBackedFiles(PFile directory, PFile rootDir, String assetRootPath) {
+        String relativePath;
+        if (directory.getPath().length() <= rootDir.getPath().length() + 1) {
+            relativePath = "";
         } else {
-            pathOfSample = directory.getPath().substring(mSampleDir.getPath().length());
+            relativePath = directory.getPath().substring(rootDir.getPath().length());
         }
-        String pathOfAsset = SAMPLE_PATH + pathOfSample;
+        String pathOfAsset = assetRootPath + relativePath;
         return Observable.just(pathOfAsset)
                 .flatMap(path -> Observable.fromArray(mAssetManager.list(path)))
                 .map(child -> {
@@ -100,11 +121,33 @@ public class WorkspaceFileProvider extends ExplorerFileProvider {
     }
 
     public Observable<ScriptFile> resetSample(ScriptFile file) {
-        if (file.getPath().length() <= mSampleDir.getPath().length() + 1) {
+        return resetAssetBackedFile(file, mSampleDir, SAMPLE_PATH);
+    }
+
+    public Observable<ScriptFile> resetAutomationScript(ScriptFile file) {
+        return Observable.fromCallable(() -> {
+            copyAssetDir(AUTOMATION_SCRIPTS_PATH, mAutomationScriptsDir, true);
+            return file;
+        })
+                .subscribeOn(Schedulers.io());
+    }
+
+    public Observable<ScriptFile> resetBuiltInScript(ScriptFile file) {
+        if (inSampleDir(file)) {
+            return resetSample(file);
+        }
+        if (inAutomationScriptsDir(file)) {
+            return resetAutomationScript(file);
+        }
+        return null;
+    }
+
+    private Observable<ScriptFile> resetAssetBackedFile(ScriptFile file, PFile rootDir, String assetRootPath) {
+        if (file.getPath().length() <= rootDir.getPath().length() + 1) {
             return null;
         }
-        String pathOfSample = file.getPath().substring(mSampleDir.getPath().length());
-        String pathOfAsset = SAMPLE_PATH + pathOfSample;
+        String relativePath = file.getPath().substring(rootDir.getPath().length());
+        String pathOfAsset = assetRootPath + relativePath;
         return Observable.fromCallable(() -> {
             InputStream stream = mAssetManager.open(pathOfAsset);
             PFiles.copyStream(stream, file.getPath());
@@ -113,11 +156,40 @@ public class WorkspaceFileProvider extends ExplorerFileProvider {
                 .subscribeOn(Schedulers.io());
     }
 
+    private void copyAssetDir(String assetDirPath, File targetDir, boolean overwrite) throws java.io.IOException {
+        String[] children = mAssetManager.list(assetDirPath);
+        if (children == null) {
+            return;
+        }
+        if (!targetDir.exists()) {
+            targetDir.mkdirs();
+        }
+        for (String child : children) {
+            copyAssetEntry(assetDirPath + "/" + child, new File(targetDir, child), overwrite);
+        }
+    }
+
+    private void copyAssetEntry(String assetPath, File target, boolean overwrite) throws java.io.IOException {
+        try (InputStream stream = mAssetManager.open(assetPath)) {
+            if (target.exists() && !overwrite) {
+                return;
+            }
+            File parent = target.getParentFile();
+            if (parent != null && !parent.exists()) {
+                parent.mkdirs();
+            }
+            PFiles.copyStream(stream, target.getPath());
+        } catch (FileNotFoundException e) {
+            copyAssetDir(assetPath, target, overwrite);
+        }
+    }
+
     @Override
     protected ExplorerDirPage createExplorerPage(String path, ExplorerPage parent) {
         ExplorerDirPage page = super.createExplorerPage(path, parent);
         if (new File(path).equals(new File(Pref.getScriptDirPath()))) {
             page.addChild(ExplorerSamplePage.createRoot(mSampleDir));
+            page.addChild(ExplorerAutomationScriptPage.createRoot(mAutomationScriptsDir));
         }
         return page;
     }

@@ -325,10 +325,11 @@ open class ExplorerViewKt : ThemeColorSwipeRefreshLayout, OnRefreshListener,
             R.id.action_sort_by_name -> sort(ExplorerItemList.SORT_TYPE_NAME, dirSortMenuShowing)
             R.id.action_sort_by_size -> sort(ExplorerItemList.SORT_TYPE_SIZE, dirSortMenuShowing)
             R.id.reset -> {
-                Explorers.Providers.workspace().resetSample(
+                val resetTask = Explorers.Providers.workspace().resetBuiltInScript(
                     selectedItem!!.toScriptFile()
-                ).observeOn(AndroidSchedulers.mainThread())
-                    .subscribe({
+                )
+                resetTask?.observeOn(AndroidSchedulers.mainThread())
+                    ?.subscribe({
                         Snackbar.make(
                             this,
                             R.string.text_reset_succeed,
@@ -547,7 +548,7 @@ open class ExplorerViewKt : ThemeColorSwipeRefreshLayout, OnRefreshListener,
             if (!explorerItem!!.canRename()) {
                 menu.removeItem(R.id.rename)
             }
-            if (explorerItem !is ExplorerSampleItem) {
+            if (explorerItem !is ExplorerSampleItem && explorerItem !is ExplorerAutomationScriptItem) {
                 menu.removeItem(R.id.reset)
             }
             popupMenu.setOnMenuItemClickListener(this@ExplorerViewKt)
@@ -580,7 +581,7 @@ open class ExplorerViewKt : ThemeColorSwipeRefreshLayout, OnRefreshListener,
             name!!.text = ExplorerViewHelper.getDisplayName(data)
             icon!!.setImageResource(ExplorerViewHelper.getIcon(data))
             options!!.visibility =
-                if (data is ExplorerSamplePage) GONE else VISIBLE
+                if (data is ExplorerSamplePage || data is ExplorerAutomationScriptPage) GONE else VISIBLE
             explorerPage = data
         }
 
