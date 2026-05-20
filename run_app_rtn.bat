@@ -4,6 +4,10 @@ setlocal EnableExtensions EnableDelayedExpansion
 set ROOT_DIR=%~dp0
 cd /d "%ROOT_DIR%"
 
+set "BUILD_ONLY="
+if /i "%~1"=="build" set "BUILD_ONLY=1"
+if /i "%~1"=="--build-only" set "BUILD_ONLY=1"
+
 :: --- Configuration (Hardcoded) ---
 set "JAVA_HOME=C:\Program Files\Java\jdk-11.0.12"
 set "GRADLE_USER_HOME=F:/software/Android-New-Gradle-Cache/.gradle"
@@ -32,6 +36,7 @@ echo [VERIFY] Step1: Gradle assembleDebug
 call "%ROOT_DIR%gradlew.bat" :app:assembleDebug
 if errorlevel 1 (
   echo [VERIFY] assembleDebug failed
+  if defined BUILD_ONLY exit /b 101
   pause
   exit /b 101
 )
@@ -39,8 +44,15 @@ if errorlevel 1 (
 set APK_PATH=%ROOT_DIR%app\build\outputs\apk\common\debug\app-common-arm64-v8a-debug.apk
 if not exist "%APK_PATH%" (
   echo [VERIFY] APK not found: %APK_PATH%
+  if defined BUILD_ONLY exit /b 102
   pause
   exit /b 102
+)
+
+if defined BUILD_ONLY (
+  echo [VERIFY] Build-only mode, skip install/launch
+  echo [VERIFY] APK ready: %APK_PATH%
+  exit /b 0
 )
 
 :: --- Prepare ADB ---

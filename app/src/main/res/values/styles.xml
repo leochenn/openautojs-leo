@@ -75,4 +75,22 @@
         <item name="android:textColorSecondary">@color/colorAccent</item>
     </style>
 
+    <style name="CaptchaNumberKeyboardKey">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">match_parent</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:background">@drawable/btn_selector</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+        <item name="android:gravity">center</item>
+        <item name="android:includeFontPadding">false</item>
+        <item name="android:textColor">@color/on_surface</item>
+        <item name="android:textSize">18sp</item>
+    </style>
+
+    <style name="CaptchaNumberKeyboardDoneKey" parent="CaptchaNumberKeyboardKey">
+        <item name="android:textColor">@color/colorPrimary</item>
+        <item name="android:textSize">15sp</item>
+    </style>
+
 </resources>
