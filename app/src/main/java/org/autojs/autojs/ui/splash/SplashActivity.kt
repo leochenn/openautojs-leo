@@ -26,7 +26,7 @@ import com.google.accompanist.systemuicontroller.rememberSystemUiController
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.autojs.autojs.ui.compose.theme.AutoXJsTheme
-import org.autojs.autojs.ui.main.MainActivity
+import org.autojs.autojs.ui.beginner.BeginnerHomeActivity
 import org.openautojs.autojs.R
 
 /**
@@ -125,7 +125,7 @@ class SplashActivity : ComponentActivity() {
             return
         }
         mAlreadyEnterNextActivity = true
-        startActivity(Intent(this, MainActivity::class.java))
+        startActivity(Intent(this, BeginnerHomeActivity::class.java))
         finish()
     }
 
