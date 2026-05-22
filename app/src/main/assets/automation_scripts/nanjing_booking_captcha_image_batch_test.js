@@ -86,6 +86,17 @@ function fileTimeText() {
         pad(d.getMilliseconds(), 3);
 }
 
+function runDirText() {
+    var d = new Date();
+    function pad(n, len) {
+        n = String(n);
+        while (n.length < len) n = "0" + n;
+        return n;
+    }
+    return pad(d.getMonth() + 1, 2) + pad(d.getDate(), 2) + "-" +
+        pad(d.getHours(), 2) + pad(d.getMinutes(), 2) + pad(d.getSeconds(), 2);
+}
+
 function logx(msg) {
     var line = "[" + nowText() + "][CAPTCHA_IMAGE_TEST] " + msg;
     log(line);
@@ -297,6 +308,10 @@ function csvCell(value) {
 }
 
 function main() {
+    var runDir = CONFIG.outputDir + "/" + runDirText();
+    files.ensureDir(runDir + "/");
+    CONFIG.outputDir = runDir;
+
     var sampleDir = resolveSampleDir();
     var solver = loadCaptchaSolverForImageTest();
     if (!solver || typeof solver.__testRecognizeMath !== "function") {

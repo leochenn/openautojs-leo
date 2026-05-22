@@ -197,6 +197,17 @@ function fileTimeText() {
         pad(d.getMilliseconds(), 3);
 }
 
+function runDirText() {
+    var d = new Date();
+    function pad(n, len) {
+        n = String(n);
+        while (n.length < len) n = "0" + n;
+        return n;
+    }
+    return pad(d.getMonth() + 1, 2) + pad(d.getDate(), 2) + "-" +
+        pad(d.getHours(), 2) + pad(d.getMinutes(), 2) + pad(d.getSeconds(), 2);
+}
+
 function logx(type, msg) {
     var line = "[" + nowText() + "][" + STAGE + "][" + type + "] " + msg;
     log(line);
@@ -1750,9 +1761,11 @@ function validateConfig() {
 function initRuntime() {
     auto.waitFor();
     runtime.screen = { width: device.width, height: device.height };
+    runtime.runDir = CONFIG.outputDir + "/" + runDirText();
     runtime.latestLogPath = CONFIG.logPath;
-    runtime.logPath = CONFIG.outputDir + "/nanjing_booking_run_" + fileTimeText() + ".log";
+    runtime.logPath = runtime.runDir + "/nanjing_booking_run_" + fileTimeText() + ".log";
     try {
+        files.ensureDir(runtime.runDir + "/");
         files.ensureDir(CONFIG.logPath);
         files.ensureDir(runtime.logPath);
         files.ensureDir(CONFIG.cachePath);
@@ -1764,7 +1777,9 @@ function initRuntime() {
     logx("INIT", "配置=" + JSON.stringify(CONFIG));
     logx("INIT", "屏幕=" + device.width + "x" + device.height);
     logx("INIT", "缓存路径 primary=" + CONFIG.cachePath + " backup=" + CONFIG.backupCachePath);
+    logx("INIT", "本次运行目录=" + runtime.runDir);
     logx("INIT", "本次日志路径=" + runtime.logPath + " latest日志路径=" + runtime.latestLogPath);
+    CONFIG.outputDir = runtime.runDir;
     notifyUser("预约脚本启动，正在请求截图权限");
 
     if (!requestScreenCapture()) {

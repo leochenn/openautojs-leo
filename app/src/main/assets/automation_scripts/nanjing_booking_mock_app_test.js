@@ -104,6 +104,17 @@ function fileTimeText() {
         pad(d.getMilliseconds(), 3);
 }
 
+function runDirText() {
+    var d = new Date();
+    function pad(n, len) {
+        n = String(n);
+        while (n.length < len) n = "0" + n;
+        return n;
+    }
+    return pad(d.getMonth() + 1, 2) + pad(d.getDate(), 2) + "-" +
+        pad(d.getHours(), 2) + pad(d.getMinutes(), 2) + pad(d.getSeconds(), 2);
+}
+
 function writeLogLine(line) {
     try {
         files.append(runtime.logPath, line + "\n");
@@ -139,12 +150,15 @@ function fail(msg) {
 }
 
 function initLog() {
-    runtime.logPath = CONFIG.outputDir + "/nanjing_booking_mock_app_test_" + fileTimeText() + ".log";
+    runtime.runDir = CONFIG.outputDir + "/" + runDirText();
+    files.ensureDir(runtime.runDir + "/");
+    CONFIG.outputDir = runtime.runDir;
+    runtime.logPath = runtime.runDir + "/nanjing_booking_mock_app_test_" + fileTimeText() + ".log";
     runtime.latestLogPath = CONFIG.latestLogPath;
     try {
-        files.ensureDir(CONFIG.outputDir);
         files.remove(runtime.latestLogPath);
     } catch (ignored) {}
+    logx("运行目录=" + runtime.runDir);
     logx("日志路径=" + runtime.logPath + " latest=" + runtime.latestLogPath);
 }
 

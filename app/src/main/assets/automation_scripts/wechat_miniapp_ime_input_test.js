@@ -51,6 +51,13 @@ function fileTimeText() {
         String(d.getMilliseconds() + 1000).substring(1);
 }
 
+function runDirText() {
+    var d = new Date();
+    function pad(n) { return n < 10 ? "0" + n : String(n); }
+    return pad(d.getMonth() + 1) + pad(d.getDate()) + "-" +
+        pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds());
+}
+
 function logx(message) {
     var line = "[IME_TEST][" + nowText() + "] " + message;
     log(line);
@@ -262,6 +269,10 @@ function saveAfterScreenshot(answer) {
 
 function main() {
     ensureOutputDir();
+    var runDir = CONFIG.outputDir + "/" + runDirText();
+    files.ensureDir(runDir + "/");
+    CONFIG.outputDir = runDir;
+    runtime.logPath = runDir + "/wechat_miniapp_ime_input_test.log";
     files.write(runtime.logPath, "");
     logx("脚本启动，" + CONFIG.waitBeforeStartMs + "ms 内请手动切换到目标微信小程序页面");
     toast("5秒内切换到目标微信小程序页面");
