@@ -81,6 +81,15 @@ var CONFIG = {
             trackMinRatio: 0.12,
             arrowMinRatio: 0.08,
             arrowStrongMinRatio: 0.08,
+            fastTypeProbeStep: 12,
+            fastImageScanStep: 14,
+            trackPresenceMinRatio: 0.006,
+            trackPresenceMinHits: 3,
+            handlePresenceMinRatio: 0.045,
+            handlePresenceMinHits: 4,
+            handleConfirmMinRatio: 0.065,
+            imageProbeMinRatio: 0.004,
+            fastImageMinColumnHits: 3,
             grayMin: 165,
             grayMax: 245,
             grayChromaMax: 24,
@@ -407,6 +416,96 @@ function resolveCaptchaModulePath() {
     return "";
 }
 
+function captchaProfilePath() {
+    return joinLocalPath(currentScriptDir(), "captcha_layout_profile.json");
+}
+
+function isValidCaptchaRegion(region) {
+    return !!(region &&
+        typeof region.x === "number" &&
+        typeof region.y === "number" &&
+        typeof region.w === "number" &&
+        typeof region.h === "number" &&
+        region.x >= 0 &&
+        region.y >= 0 &&
+        region.w > 0 &&
+        region.h > 0);
+}
+
+function validateCaptchaRegion(region, name, profile) {
+    if (!isValidCaptchaRegion(region)) {
+        return name + " 未完成或宽高无效";
+    }
+    if (region.x + region.w > profile.deviceWidth || region.y + region.h > profile.deviceHeight) {
+        return name + " 超出校准屏幕范围";
+    }
+    return "";
+}
+
+function validateCaptchaProfile(profile) {
+    if (!profile) return "profile 为空";
+    if (profile.schemaVersion !== 1) return "profile 版本不支持";
+    if (profile.deviceWidth !== device.width || profile.deviceHeight !== device.height) {
+        return "profile 屏幕尺寸 " + profile.deviceWidth + "x" + profile.deviceHeight +
+            " 与当前设备 " + device.width + "x" + device.height + " 不一致";
+    }
+    var math = profile.mathProfile;
+    if (!math || math.completed !== true) return "数学验证码未完成校准";
+    var mathErr = validateCaptchaRegion(math.expressionRegion, "数学表达式区域", profile) ||
+        validateCaptchaRegion(math.inputRegion, "数学输入框区域", profile) ||
+        validateCaptchaRegion(math.submitRegion, "数学确定按钮区域", profile);
+    if (mathErr) return mathErr;
+
+    var slider = profile.sliderProfile;
+    if (!slider || slider.completed !== true) return "滑块验证码未完成校准";
+    var sliderErr = validateCaptchaRegion(slider.imageSearchRegion, "滑块灰块搜索区域", profile) ||
+        validateCaptchaRegion(slider.handleRegion, "滑块拖动起点区域", profile) ||
+        validateCaptchaRegion(slider.trackRegion, "滑块轨道区域", profile) ||
+        validateCaptchaRegion(slider.submitRegion, "滑块确定按钮区域", profile);
+    if (sliderErr) return sliderErr;
+    return "";
+}
+
+function loadCaptchaProfile() {
+    var path = captchaProfilePath();
+    if (!files.exists(path)) {
+        return { ok: false, reason: "未找到验证码校准配置：" + path };
+    }
+    try {
+        var profile = JSON.parse(files.read(path));
+        var error = validateCaptchaProfile(profile);
+        if (error) {
+            return { ok: false, reason: error, path: path };
+        }
+        return { ok: true, profile: profile, path: path };
+    } catch (e) {
+        return { ok: false, reason: "读取验证码校准配置失败：" + e, path: path };
+    }
+}
+
+function applyCaptchaProfileToConfig() {
+    if (CONFIG.captcha && CONFIG.captcha.profileValidated === true) {
+        return { ok: true, profile: CONFIG.captcha.profile };
+    }
+    var loaded = loadCaptchaProfile();
+    if (!loaded.ok) {
+        return loaded;
+    }
+    CONFIG.captcha.profile = loaded.profile;
+    CONFIG.captcha.profilePath = loaded.path;
+    CONFIG.captcha.profileValidated = true;
+    logx("CAPTCHA", "验证码校准配置已加载 path=" + loaded.path +
+        " screen=" + loaded.profile.deviceWidth + "x" + loaded.profile.deviceHeight);
+    return loaded;
+}
+
+function requireCaptchaProfileForRun() {
+    var loaded = applyCaptchaProfileToConfig();
+    if (!loaded.ok) {
+        fail("验证码坐标校准不可用：" + loaded.reason + "，请先在 App 首页进入验证码校准并重新保存");
+    }
+}
+
 function loadCaptchaSolver() {
     if (runtime.captchaSolver) return runtime.captchaSolver;
     if (!CONFIG.captcha || !CONFIG.captcha.enabled) return null;
@@ -446,6 +545,13 @@ function solveCaptchaAfterConfirmForRush() {
     if (!CONFIG.captcha || !CONFIG.captcha.enabled) {
         logx("CAPTCHA", "验证码流程已关闭，跳过自动处理");
         return { ok: true, skipped: true, reason: "captcha_disabled" };
+    }
+    var profileResult = applyCaptchaProfileToConfig();
+    if (!profileResult.ok) {
+        var profileReason = "验证码校准配置不可用：" + profileResult.reason + "，请回到 App 重新校准";
+        logx("CAPTCHA", profileReason);
+        notifyUser(profileReason);
+        return { ok: false, manualFallback: true, reason: profileResult.reason };
     }
 
     var solver = loadCaptchaSolver();
@@ -1636,6 +1742,9 @@ function validateConfig() {
     if (CONFIG.period !== "上午" && CONFIG.period !== "下午") fail("period 只能是 上午 或 下午");
     if (CONFIG.visitorCount < 1 || CONFIG.visitorCount > 5) fail("visitorCount 必须在 1 到 5 之间");
     parseStartTime();
+    if (CONFIG.captcha && CONFIG.captcha.enabled && CONFIG.prepareOnly !== true) {
+        requireCaptchaProfileForRun();
+    }
 }
 
 function initRuntime() {

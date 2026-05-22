@@ -61,6 +61,7 @@ import org.autojs.autojs.model.automation.BookingConfig
 import org.autojs.autojs.model.script.ScriptFile
 import org.autojs.autojs.model.script.Scripts
 import org.autojs.autojs.tool.AccessibilityServiceTool
+import org.autojs.autojs.ui.captcha.CaptchaCalibrationActivity
 import org.autojs.autojs.ui.compose.theme.AutoXJsTheme
 import org.autojs.autojs.ui.main.MainActivity
 import org.autojs.autojs.ui.main.rememberExternalStoragePermissionsState
@@ -128,6 +129,18 @@ private fun BeginnerHomeScreen(
     val imeSelected = remember(refreshTick) {
         CaptchaInputMethodStatus.isSelected(context)
     }
+    val captchaProfile = remember(refreshTick) {
+        AutomationScripts.loadCaptchaProfile(context)
+    }
+    val captchaMathReady = captchaProfile?.mathCompleted == true
+    val captchaSliderReady = captchaProfile?.sliderCompleted == true
+    val captchaReady = captchaMathReady && captchaSliderReady
+    val captchaDescription = when {
+        captchaReady -> "数学验证码和滑块验证码已完成"
+        captchaMathReady -> "数学验证码已完成，滑块验证码未完成"
+        captchaSliderReady -> "滑块验证码已完成，数学验证码未完成"
+        else -> "正式抢票前需要完成数学和滑块区域校准"
+    }
 
     var visitDate by rememberSaveable { mutableStateOf(initialConfig.visitDate) }
     var period by rememberSaveable { mutableStateOf(initialConfig.period) }
@@ -188,6 +201,11 @@ private fun BeginnerHomeScreen(
                 },
                 openInputMethodGuide = {
                     context.startActivity(Intent(context, InputMethodGuideActivity::class.java))
+                },
+                captchaReady = captchaReady,
+                captchaDescription = captchaDescription,
+                openCaptchaCalibration = {
+                    context.startActivity(Intent(context, CaptchaCalibrationActivity::class.java))
                 }
             )
 
@@ -280,7 +298,10 @@ private fun SetupCard(
     imeSelected: Boolean,
     requestStoragePermission: () -> Unit,
     openAccessibilitySettings: () -> Unit,
-    openInputMethodGuide: () -> Unit
+    openInputMethodGuide: () -> Unit,
+    captchaReady: Boolean,
+    captchaDescription: String,
+    openCaptchaCalibration: () -> Unit
 ) {
     OutlinedCard(
         modifier = Modifier.fillMaxWidth(),
@@ -320,6 +341,14 @@ private fun SetupCard(
                 ready = imeReady,
                 actionText = if (imeReady) "查看设置" else "去设置",
                 onAction = openInputMethodGuide
+            )
+            Divider()
+            SetupStatusRow(
+                title = "验证码校准",
+                description = captchaDescription,
+                ready = captchaReady,
+                actionText = if (captchaReady) "查看" else "去校准",
+                onAction = openCaptchaCalibration
             )
         }
     }

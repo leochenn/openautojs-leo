@@ -18,7 +18,9 @@ data class BookingConfig(
 object AutomationScripts {
     private const val ASSET_DIR = "automation_scripts"
     private const val CONFIG_FILE_NAME = "nanjing_booking_config.json"
+    const val CAPTCHA_PROFILE_FILE_NAME = CaptchaCalibrationStore.PROFILE_FILE_NAME
     const val MAIN_SCRIPT_NAME = "nanjing_booking_auto.js"
+    const val CAPTCHA_SIMULATOR_SCRIPT_NAME = "nanjing_booking_captcha_profile_simulator.js"
 
     val defaultConfig = BookingConfig()
 
@@ -41,8 +43,33 @@ object AutomationScripts {
         return File(scriptsDir(context), MAIN_SCRIPT_NAME)
     }
 
+    fun captchaSimulatorScriptFile(context: Context): File {
+        ensureReady(context)
+        return File(scriptsDir(context), CAPTCHA_SIMULATOR_SCRIPT_NAME)
+    }
+
     fun configFile(context: Context): File {
         return File(scriptsDir(context), CONFIG_FILE_NAME)
+    }
+
+    fun captchaProfileFile(context: Context): File {
+        return CaptchaCalibrationStore.profileFile(context)
+    }
+
+    fun loadCaptchaProfile(context: Context): CaptchaCalibrationProfile? {
+        return CaptchaCalibrationStore.load(context)
+    }
+
+    fun saveCaptchaProfile(context: Context, profile: CaptchaCalibrationProfile) {
+        CaptchaCalibrationStore.save(context, profile)
+    }
+
+    fun validateCaptchaProfile(context: Context, profile: CaptchaCalibrationProfile): String? {
+        return CaptchaCalibrationStore.validateForBooking(context, profile)
+    }
+
+    fun validateCaptchaProfileForSave(context: Context, profile: CaptchaCalibrationProfile): String? {
+        return CaptchaCalibrationStore.validateForSave(context, profile)
     }
 
     fun loadConfig(context: Context): BookingConfig {

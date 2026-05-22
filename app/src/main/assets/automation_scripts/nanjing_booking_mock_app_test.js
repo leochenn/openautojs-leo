@@ -61,6 +61,15 @@ var CONFIG = {
             trackMinRatio: 0.12,
             arrowMinRatio: 0.08,
             arrowStrongMinRatio: 0.08,
+            fastTypeProbeStep: 12,
+            fastImageScanStep: 14,
+            trackPresenceMinRatio: 0.006,
+            trackPresenceMinHits: 3,
+            handlePresenceMinRatio: 0.045,
+            handlePresenceMinHits: 4,
+            handleConfirmMinRatio: 0.065,
+            imageProbeMinRatio: 0.004,
+            fastImageMinColumnHits: 3,
             grayMin: 165,
             grayMax: 245,
             grayChromaMax: 24,
@@ -79,7 +88,8 @@ var runtime = {
     logPath: CONFIG.latestLogPath,
     latestLogPath: CONFIG.latestLogPath,
     captchaTemplates: null,
-    captchaStats: null
+    captchaStats: null,
+    captchaProfile: null
 };
 
 function fileTimeText() {
@@ -216,6 +226,139 @@ function scaledRegion(region) {
         w: clamp(scaleX(region.w), 1, device.width - x),
         h: clamp(scaleY(region.h), 1, device.height - y)
     };
+}
+
+function joinLocalPath(dir, name) {
+    if (!dir) return name;
+    var last = dir.charAt(dir.length - 1);
+    if (last === "/" || last === "\\") return dir + name;
+    return dir + "/" + name;
+}
+
+function currentScriptDir() {
+    try {
+        var source = engines.myEngine().source;
+        var path = String(source || "");
+        if (path.indexOf("file://") === 0) path = path.substring(7);
+        var q = path.indexOf("?");
+        if (q >= 0) path = path.substring(0, q);
+        var idx = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+        if (idx > 0) return path.substring(0, idx);
+    } catch (ignored) {}
+    try {
+        return files.cwd();
+    } catch (ignoredCwd) {}
+    return "";
+}
+
+function captchaProfilePath() {
+    return joinLocalPath(currentScriptDir(), "captcha_layout_profile.json");
+}
+
+function isValidCaptchaRegion(region) {
+    return !!(region &&
+        typeof region.x === "number" &&
+        typeof region.y === "number" &&
+        typeof region.w === "number" &&
+        typeof region.h === "number" &&
+        region.x >= 0 &&
+        region.y >= 0 &&
+        region.w > 0 &&
+        region.h > 0);
+}
+
+function validateCaptchaRegion(region, name, profile) {
+    if (!isValidCaptchaRegion(region)) {
+        return name + " invalid_or_missing";
+    }
+    if (region.x + region.w > profile.deviceWidth || region.y + region.h > profile.deviceHeight) {
+        return name + " out_of_profile_screen";
+    }
+    return "";
+}
+
+function validateCaptchaProfile(profile) {
+    if (!profile) return "profile_empty";
+    if (profile.schemaVersion !== 1) return "unsupported_schema_version";
+    if (profile.deviceWidth !== device.width || profile.deviceHeight !== device.height) {
+        return "screen_mismatch profile=" + profile.deviceWidth + "x" + profile.deviceHeight +
+            " current=" + device.width + "x" + device.height;
+    }
+    var math = profile.mathProfile;
+    if (!math || math.completed !== true) return "math_profile_incomplete";
+    var mathErr = validateCaptchaRegion(math.expressionRegion, "math.expressionRegion", profile) ||
+        validateCaptchaRegion(math.inputRegion, "math.inputRegion", profile) ||
+        validateCaptchaRegion(math.submitRegion, "math.submitRegion", profile);
+    if (mathErr) return mathErr;
+
+    var slider = profile.sliderProfile;
+    if (!slider || slider.completed !== true) return "slider_profile_incomplete";
+    var sliderErr = validateCaptchaRegion(slider.imageSearchRegion, "slider.imageSearchRegion", profile) ||
+        validateCaptchaRegion(slider.handleRegion, "slider.handleRegion", profile) ||
+        validateCaptchaRegion(slider.trackRegion, "slider.trackRegion", profile) ||
+        validateCaptchaRegion(slider.submitRegion, "slider.submitRegion", profile);
+    if (sliderErr) return sliderErr;
+    return "";
+}
+
+function loadCaptchaProfile() {
+    var path = captchaProfilePath();
+    if (!files.exists(path)) {
+        fail("captcha calibration profile missing: " + path);
+    }
+    var profile = null;
+    try {
+        profile = JSON.parse(files.read(path));
+    } catch (e) {
+        fail("captcha calibration profile read failed: " + e + " path=" + path);
+    }
+    var error = validateCaptchaProfile(profile);
+    if (error) {
+        fail("captcha calibration profile invalid: " + error + " path=" + path);
+    }
+    runtime.captchaProfile = profile;
+    logx("captcha calibration profile loaded path=" + path +
+        " screen=" + profile.deviceWidth + "x" + profile.deviceHeight);
+    return profile;
+}
+
+function activeMathProfile() {
+    var profile = runtime.captchaProfile;
+    if (!profile || !profile.mathProfile || profile.mathProfile.completed !== true) return null;
+    return profile.mathProfile;
+}
+
+function activeSliderProfile() {
+    var profile = runtime.captchaProfile;
+    if (!profile || !profile.sliderProfile || profile.sliderProfile.completed !== true) return null;
+    return profile.sliderProfile;
+}
+
+function normalizeProfileRegion(region, name, templateEnabled) {
+    region = region || {};
+    return {
+        x: Math.round(region.x || 0),
+        y: Math.round(region.y || 0),
+        w: Math.round(region.w || 0),
+        h: Math.round(region.h || 0),
+        name: name || region.name || "",
+        templateEnabled: templateEnabled !== false
+    };
+}
+
+function pointFromRegionCenter(name, region) {
+    region = normalizeProfileRegion(region, name, true);
+    return {
+        x: Math.round(region.x + region.w / 2),
+        y: Math.round(region.y + region.h / 2),
+        source: "captcha-profile:" + name
+    };
+}
+
+function mathExpressionRegion() {
+    var math = activeMathProfile();
+    if (math) return normalizeProfileRegion(math.expressionRegion, "profileMathExpression", true);
+    return scaledRegion(CONFIG.captcha.expressionRegion);
 }
 
 function cachedPoint(key, fallback) {
@@ -401,9 +544,9 @@ function gestureToVisitors() {
 }
 
 function isWhiteCaptchaPixel(color) {
-    var r = colors.red(color);
-    var g = colors.green(color);
-    var b = colors.blue(color);
+    var r = colorRed(color);
+    var g = colorGreen(color);
+    var b = colorBlue(color);
     var min = Math.min(r, g, b);
     var max = Math.max(r, g, b);
     return min >= CONFIG.captcha.whiteThreshold && (max - min) <= 28;
@@ -414,6 +557,44 @@ function imagePixel(img, x, y) {
         return img.pixel(x, y);
     }
     return images.pixel(img, x, y);
+}
+
+function makePixelReader(img) {
+    var bitmap = null;
+    try {
+        if (img && typeof img.getBitmap === "function") {
+            bitmap = img.getBitmap();
+        }
+    } catch (ignoredBitmap) {}
+    if (bitmap && typeof bitmap.getPixel === "function") {
+        return function (x, y) {
+            return bitmap.getPixel(Math.round(x), Math.round(y));
+        };
+    }
+    return function (x, y) {
+        return imagePixel(img, Math.round(x), Math.round(y));
+    };
+}
+
+function colorNumber(color) {
+    if (typeof color === "number") return color;
+    try {
+        return Number(color);
+    } catch (ignored) {
+        return 0;
+    }
+}
+
+function colorRed(color) {
+    return (colorNumber(color) >> 16) & 0xff;
+}
+
+function colorGreen(color) {
+    return (colorNumber(color) >> 8) & 0xff;
+}
+
+function colorBlue(color) {
+    return colorNumber(color) & 0xff;
 }
 
 function saveCaptchaFailure(img, region, reason) {
@@ -1284,8 +1465,13 @@ function finishCaptchaInput(answer, submitPoint, detail) {
 }
 
 function inputCaptchaAnswer(answer) {
-    var inputPoint = basePoint("captchaInput", CONFIG.captcha.inputPoint.x, CONFIG.captcha.inputPoint.y);
-    var submitPoint = basePoint("captchaSubmit", CONFIG.captcha.submitPoint.x, CONFIG.captcha.submitPoint.y);
+    var math = activeMathProfile();
+    var inputPoint = math
+        ? pointFromRegionCenter("mathInput", math.inputRegion)
+        : basePoint("captchaInput", CONFIG.captcha.inputPoint.x, CONFIG.captcha.inputPoint.y);
+    var submitPoint = math
+        ? pointFromRegionCenter("mathSubmit", math.submitRegion)
+        : basePoint("captchaSubmit", CONFIG.captcha.submitPoint.x, CONFIG.captcha.submitPoint.y);
     var imeCfg = CONFIG.captcha.inputMethod || {};
     pressPoint("验证码输入框", inputPoint);
     if (imeCfg.focusWaitMs > 0) {
@@ -1307,9 +1493,9 @@ function inputCaptchaAnswer(answer) {
 }
 
 function isSliderGrayPixel(color) {
-    var r = colors.red(color);
-    var g = colors.green(color);
-    var b = colors.blue(color);
+    var r = colorRed(color);
+    var g = colorGreen(color);
+    var b = colorBlue(color);
     var min = Math.min(r, g, b);
     var max = Math.max(r, g, b);
     var cfg = CONFIG.captcha.slider;
@@ -1317,25 +1503,26 @@ function isSliderGrayPixel(color) {
 }
 
 function isSliderTrackPixel(color) {
-    var r = colors.red(color);
-    var g = colors.green(color);
-    var b = colors.blue(color);
+    var r = colorRed(color);
+    var g = colorGreen(color);
+    var b = colorBlue(color);
     var min = Math.min(r, g, b);
     var max = Math.max(r, g, b);
     return min >= 205 && max <= 235 && (max - min) <= 12;
 }
 
 function isSliderArrowPixel(color) {
-    return colors.red(color) <= 55 && colors.green(color) <= 55 && colors.blue(color) <= 60;
+    return colorRed(color) <= 55 && colorGreen(color) <= 55 && colorBlue(color) <= 60;
 }
 
-function pixelRatioInRegion(img, region, step, predicate) {
+function pixelRatioInRegion(img, region, step, predicate, pixelAt) {
     var total = 0;
     var hits = 0;
+    pixelAt = pixelAt || makePixelReader(img);
     for (var y = 0; y < region.h; y += step) {
         for (var x = 0; x < region.w; x += step) {
             total++;
-            if (predicate(imagePixel(img, region.x + x, region.y + y))) {
+            if (predicate(pixelAt(region.x + x, region.y + y))) {
                 hits++;
             }
         }
@@ -1348,17 +1535,112 @@ function pixelRatioInRegion(img, region, step, predicate) {
     };
 }
 
-function detectSliderCaptchaByTrack(img) {
+function detectSliderImageSignal(img, region, pixelAt) {
     var cfg = CONFIG.captcha.slider;
-    var step = 4;
-    var track = pixelRatioInRegion(img, scaledRegion(cfg.trackProbeRegion), step, isSliderTrackPixel);
-    var arrow = pixelRatioInRegion(img, scaledRegion(cfg.arrowProbeRegion), step, isSliderArrowPixel);
+    var step = cfg.fastImageScanStep || 14;
+    var minColumnHits = cfg.fastImageMinColumnHits || 3;
+    var minSide = scaleX((cfg.minSide || 90) * 0.55);
+    var maxSide = scaleX((cfg.maxSide || 215) * 1.45);
+    var yStart = Math.round(region.h * 0.34);
+    var yEnd = Math.round(region.h * 0.9);
+    var colCount = [];
+    var grayHits = 0;
+    var total = 0;
+    var x;
+    var y;
+    var slot;
+    for (x = 0; x <= region.w; x += step) {
+        colCount[Math.floor(x / step)] = 0;
+    }
+    for (y = yStart; y < yEnd; y += step) {
+        for (x = 0; x < region.w; x += step) {
+            total++;
+            if (isSliderGrayPixel(pixelAt(region.x + x, region.y + y))) {
+                grayHits++;
+                colCount[Math.floor(x / step)]++;
+            }
+        }
+    }
+
+    var runs = [];
+    var inRun = false;
+    var startSlot = 0;
+    var quietSlots = 0;
+    for (slot = 0; slot <= colCount.length; slot++) {
+        var active = slot < colCount.length && colCount[slot] >= minColumnHits;
+        if (active && !inRun) {
+            inRun = true;
+            startSlot = slot;
+            quietSlots = 0;
+        } else if (!active && inRun) {
+            quietSlots++;
+            if (quietSlots > 2 || slot === colCount.length) {
+                runs.push({ x1: startSlot * step, x2: Math.min(region.w - 1, (slot - quietSlots + 1) * step) });
+                inRun = false;
+                quietSlots = 0;
+            }
+        } else if (active) {
+            quietSlots = 0;
+        }
+    }
+
+    var boxes = [];
+    for (var i = 0; i < runs.length; i++) {
+        var run = runs[i];
+        var runW = run.x2 - run.x1 + 1;
+        if (runW < minSide || runW > maxSide) continue;
+        boxes.push({
+            x: region.x + run.x1,
+            y: region.y + yStart,
+            w: runW,
+            h: runW
+        });
+    }
+    var ratio = total ? grayHits / total : 0;
+    return {
+        ok: boxes.length >= 1 && ratio >= (cfg.imageProbeMinRatio || 0.004),
+        ratio: ratio,
+        hits: grayHits,
+        total: total,
+        boxes: boxes,
+        runs: runs.length,
+        step: step,
+        region: region
+    };
+}
+
+function detectSliderCaptchaByRegions(img, trackRegion, handleRegion, imageSearchRegion) {
+    var cfg = CONFIG.captcha.slider;
+    var start = Date.now();
+    var pixelAt = makePixelReader(img);
+    var step = cfg.fastTypeProbeStep || 12;
+    var trackStart = Date.now();
+    var track = pixelRatioInRegion(img, trackRegion, step, isSliderTrackPixel, pixelAt);
+    var trackCost = Date.now() - trackStart;
+    var handleStart = Date.now();
+    var arrow = pixelRatioInRegion(img, handleRegion, step, isSliderArrowPixel, pixelAt);
+    var handleCost = Date.now() - handleStart;
     var trackOk = track.ratio >= cfg.trackMinRatio;
     var arrowOk = arrow.ratio >= cfg.arrowMinRatio;
     var arrowStrongMinRatio = cfg.arrowStrongMinRatio || cfg.arrowMinRatio || 0.08;
     var arrowStrongOk = arrow.ratio >= arrowStrongMinRatio;
+    var trackPresenceOk = track.ratio >= (cfg.trackPresenceMinRatio || 0.006) &&
+        track.hits >= (cfg.trackPresenceMinHits || 3);
+    var handlePresenceOk = arrow.ratio >= (cfg.handlePresenceMinRatio || 0.045) &&
+        arrow.hits >= (cfg.handlePresenceMinHits || 4);
+    var imageProbe = null;
+    var imageCost = 0;
+    var shouldScanImage = !!(imageSearchRegion && (trackPresenceOk || handlePresenceOk || arrowStrongOk));
+    if (shouldScanImage) {
+        var imageStart = Date.now();
+        imageProbe = detectSliderImageSignal(img, imageSearchRegion, pixelAt);
+        imageCost = Date.now() - imageStart;
+    }
+    var imageOk = !!(imageProbe && imageProbe.ok);
+    var pairedWeakOk = trackPresenceOk && handlePresenceOk &&
+        arrow.ratio >= (cfg.handleConfirmMinRatio || 0.065);
     return {
-        ok: (trackOk && arrowOk) || arrowStrongOk,
+        ok: (trackOk && arrowOk) || arrowStrongOk || (imageOk && (handlePresenceOk || trackPresenceOk)) || pairedWeakOk,
         ratio: track.ratio,
         hits: track.hits,
         total: track.total,
@@ -1368,14 +1650,51 @@ function detectSliderCaptchaByTrack(img) {
         trackOk: trackOk,
         arrowOk: arrowOk,
         arrowStrongOk: arrowStrongOk,
+        trackPresenceOk: trackPresenceOk,
+        handlePresenceOk: handlePresenceOk,
+        imageOk: imageOk,
+        imageRatio: imageProbe ? imageProbe.ratio : 0,
+        imageHits: imageProbe ? imageProbe.hits : 0,
+        imageTotal: imageProbe ? imageProbe.total : 0,
+        imageBoxes: imageProbe ? imageProbe.boxes.length : 0,
+        pairedWeakOk: pairedWeakOk,
+        step: step,
+        imageStep: imageProbe ? imageProbe.step : 0,
+        trackCost: trackCost,
+        handleCost: handleCost,
+        imageCost: imageCost,
+        cost: Date.now() - start,
         region: track.region
     };
 }
 
+function detectSliderCaptchaByTrack(img) {
+    var cfg = CONFIG.captcha.slider;
+    var slider = activeSliderProfile();
+    if (slider) {
+        return detectSliderCaptchaByRegions(
+            img,
+            normalizeProfileRegion(slider.trackRegion, "profileSliderTrack", true),
+            normalizeProfileRegion(slider.handleRegion, "profileSliderHandle", true),
+            normalizeProfileRegion(slider.imageSearchRegion, "profileSliderImageSearch", true)
+        );
+    }
+    return detectSliderCaptchaByRegions(
+        img,
+        scaledRegion(cfg.trackProbeRegion),
+        scaledRegion(cfg.arrowProbeRegion),
+        scaledRegion(cfg.imageRegion)
+    );
+}
+
 function recognizeSliderCaptcha(img) {
     var cfg = CONFIG.captcha.slider;
-    var region = scaledRegion(cfg.imageRegion);
+    var slider = activeSliderProfile();
+    var region = slider
+        ? normalizeProfileRegion(slider.imageSearchRegion, "profileSliderImageSearch", true)
+        : scaledRegion(cfg.imageRegion);
     var step = cfg.scanStep || 2;
+    var pixelAt = makePixelReader(img);
     var yStart = Math.round(region.h * 0.34);
     var yEnd = Math.round(region.h * 0.9);
     var colCount = [];
@@ -1387,7 +1706,7 @@ function recognizeSliderCaptcha(img) {
 
     for (y = yStart; y < yEnd; y += step) {
         for (x = 0; x < region.w; x += step) {
-            if (isSliderGrayPixel(imagePixel(img, region.x + x, region.y + y))) {
+            if (isSliderGrayPixel(pixelAt(region.x + x, region.y + y))) {
                 colCount[Math.floor(x / step)]++;
             }
         }
@@ -1454,8 +1773,13 @@ function recognizeSliderCaptcha(img) {
 
 function dragSliderCaptcha(sliderResult) {
     var cfg = CONFIG.captcha.slider;
-    var start = basePoint("sliderHandleStart", cfg.handleStartPoint.x, cfg.handleStartPoint.y);
-    var submitPoint = basePoint("sliderCaptchaSubmit", cfg.submitPoint.x, cfg.submitPoint.y);
+    var slider = activeSliderProfile();
+    var start = slider
+        ? pointFromRegionCenter("sliderHandleStart", slider.handleRegion)
+        : basePoint("sliderHandleStart", cfg.handleStartPoint.x, cfg.handleStartPoint.y);
+    var submitPoint = slider
+        ? pointFromRegionCenter("sliderCaptchaSubmit", slider.submitRegion)
+        : basePoint("sliderCaptchaSubmit", cfg.submitPoint.x, cfg.submitPoint.y);
     var endX = Math.round(sliderResult.target.centerX);
     var endY = start.y;
     logx("滑块验证码拖动 start=(" + start.x + "," + start.y + ") end=(" + endX + "," + endY + ") " + sliderResult.detail);
@@ -1490,7 +1814,7 @@ function solveCaptchaAfterConfirm() {
     var recognizeCost = 0;
     var inputStart = 0;
     var inputCost = 0;
-    var region = scaledRegion(CONFIG.captcha.expressionRegion);
+    var region = mathExpressionRegion();
     var failureRegion = region;
     try {
         logx("验证码开始截图 region=" + JSON.stringify(region));
@@ -1508,6 +1832,18 @@ function solveCaptchaAfterConfirm() {
             " trackOk=" + trackProbe.trackOk +
             " arrowOk=" + trackProbe.arrowOk +
             " arrowStrongOk=" + trackProbe.arrowStrongOk +
+            " trackPresenceOk=" + trackProbe.trackPresenceOk +
+            " handlePresenceOk=" + trackProbe.handlePresenceOk +
+            " imageOk=" + trackProbe.imageOk +
+            " imageRatio=" + trackProbe.imageRatio.toFixed(3) +
+            " imageBoxes=" + trackProbe.imageBoxes +
+            " pairedWeakOk=" + trackProbe.pairedWeakOk +
+            " step=" + trackProbe.step +
+            " imageStep=" + trackProbe.imageStep +
+            " cost=" + trackProbe.cost + "ms" +
+            " trackCost=" + trackProbe.trackCost + "ms" +
+            " handleCost=" + trackProbe.handleCost + "ms" +
+            " imageCost=" + trackProbe.imageCost + "ms" +
             " ok=" + trackProbe.ok);
         if (trackProbe.ok) {
             var sliderResult = recognizeSliderCaptcha(img);
@@ -1647,6 +1983,7 @@ function main() {
         initLog();
         initScreenCapture();
         loadCache();
+        loadCaptchaProfile();
         launchMockApp();
         clickStartButton();
         runMockRushFlow();

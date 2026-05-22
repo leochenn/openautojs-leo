@@ -36,6 +36,15 @@ var CONFIG = {
             trackMinRatio: 0.12,
             arrowMinRatio: 0.08,
             arrowStrongMinRatio: 0.08,
+            fastTypeProbeStep: 12,
+            fastImageScanStep: 14,
+            trackPresenceMinRatio: 0.006,
+            trackPresenceMinHits: 3,
+            handlePresenceMinRatio: 0.045,
+            handlePresenceMinHits: 4,
+            handleConfirmMinRatio: 0.065,
+            imageProbeMinRatio: 0.004,
+            fastImageMinColumnHits: 3,
             grayMin: 165,
             grayMax: 245,
             grayChromaMax: 24,
@@ -168,19 +177,13 @@ function resolveSampleDir() {
 function loadCaptchaSolverForImageTest() {
     var modulePath = resolveCaptchaModulePath();
     var code = files.read(modulePath);
-    var exposedReturn = "return { solveAfterConfirm: solveAfterConfirm, " +
-        "__testRecognizeMath: function(img, regions) { return recognizeCaptchaAcrossRegions(img, regions); } };";
-    var patched = code.replace(/return\s*\{\s*solveAfterConfirm:\s*solveAfterConfirm\s*\};/, exposedReturn);
-    if (patched === code) {
-        throw new Error("验证码模块测试接口注入失败，未匹配到 return solveAfterConfirm");
-    }
     var factory = eval("(function(){ var module = { exports: null }; var exports = {}; " +
-        patched + "\n; return module.exports || createNanjingBookingCaptchaSolver; })()");
+        code + "\n; return module.exports || createNanjingBookingCaptchaSolver; })()");
     if (typeof factory !== "function") {
         throw new Error("验证码模块导出异常 path=" + modulePath);
     }
     logx("验证码模块已加载 path=" + modulePath);
-    return factory({
+    var solver = factory({
         config: CONFIG,
         runtime: runtime,
         log: logx,
@@ -194,6 +197,10 @@ function loadCaptchaSolverForImageTest() {
             return { x: Math.round(x), y: Math.round(y), source: source || "" };
         }
     });
+    if (typeof solver.__testRecognizeMath !== "function") {
+        throw new Error("验证码模块未导出 __testRecognizeMath 测试接口");
+    }
+    return solver;
 }
 
 function imageWidth(img) {
