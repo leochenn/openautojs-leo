@@ -11,7 +11,6 @@ import android.graphics.Paint
 import android.net.Uri
 import android.os.Bundle
 import android.view.View
-import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -22,7 +21,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -34,18 +33,14 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -69,6 +64,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
@@ -84,12 +80,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.window.DialogWindowProvider
 import kotlinx.coroutines.delay
 import org.autojs.autojs.model.automation.AutomationScripts
 import org.autojs.autojs.model.automation.CaptchaCalibrationProfile
@@ -212,6 +205,10 @@ class CaptchaCalibrationActivity : ComponentActivity() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// 主屏幕：三步向导
+// ---------------------------------------------------------------------------
+
 @Composable
 private fun CaptchaCalibrationScreen(
     refreshTick: Int,
@@ -225,30 +222,21 @@ private fun CaptchaCalibrationScreen(
     val screenSize = remember(refreshTick) {
         CaptchaCalibrationStore.currentScreenSize(context)
     }
-    val profileError = remember(refreshTick, profile) {
-        profile?.let { AutomationScripts.validateCaptchaProfile(context, it) }
-    }
-    val profileScreenReady = profile?.let {
-        it.deviceWidth == screenSize.width && it.deviceHeight == screenSize.height
-    } == true
-    val fileExists = remember(refreshTick) {
-        AutomationScripts.captchaProfileFile(context).exists()
-    }
 
+    var step by rememberSaveable { mutableStateOf(0) }
     var selectedTypeKey by rememberSaveable { mutableStateOf(TYPE_MATH) }
     val selectedType = calibrationTypeOf(selectedTypeKey)
-    var selectedItemKey by rememberSaveable { mutableStateOf<String?>(null) }
     var mathRegions by remember { mutableStateOf(regionsFromMathProfile(profile?.mathProfile)) }
     var sliderRegions by remember { mutableStateOf(regionsFromSliderProfile(profile?.sliderProfile)) }
     var mathImage by remember { mutableStateOf<CaptchaSourceImage?>(null) }
     var sliderImage by remember { mutableStateOf<CaptchaSourceImage?>(null) }
-    var pendingPickTypeKey by remember { mutableStateOf(selectedTypeKey) }
     var message by remember { mutableStateOf<String?>(null) }
     var messageIsError by remember { mutableStateOf(false) }
     var simulationRunning by remember { mutableStateOf(false) }
     var simulationText by remember { mutableStateOf<String?>(null) }
     var simulationTextIsError by remember { mutableStateOf(false) }
     var simulationRunId by remember { mutableStateOf(0) }
+    var dimensionError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(profile) {
         mathRegions = regionsFromMathProfile(profile?.mathProfile)
@@ -256,7 +244,6 @@ private fun CaptchaCalibrationScreen(
     }
 
     LaunchedEffect(selectedTypeKey) {
-        selectedItemKey = null
         message = null
         messageIsError = false
         simulationText = null
@@ -264,9 +251,7 @@ private fun CaptchaCalibrationScreen(
     }
 
     LaunchedEffect(simulationRunId) {
-        if (!simulationRunning) {
-            return@LaunchedEffect
-        }
+        if (!simulationRunning) return@LaunchedEffect
         val resultFile = CaptchaCalibrationStore.simulationResultFile(context)
         repeat(60) {
             delay(250)
@@ -287,21 +272,26 @@ private fun CaptchaCalibrationScreen(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
         if (uri != null) {
-            val pickedType = calibrationTypeOf(pendingPickTypeKey)
             try {
                 val bitmap = decodeBitmap(context, uri)
-                saveSourceImage(context, bitmap, pickedType)
                 val sourceImage = CaptchaSourceImage(
                     bitmap = bitmap,
                     displayName = "${bitmap.width} x ${bitmap.height}"
                 )
-                if (pickedType.key == TYPE_MATH) {
-                    mathImage = sourceImage
+                val imgScreenSize = CaptchaCalibrationStore.currentScreenSize(context)
+                if (bitmap.width == imgScreenSize.width && bitmap.height == imgScreenSize.height) {
+                    saveSourceImage(context, bitmap, selectedType)
+                    if (selectedType.key == TYPE_MATH) {
+                        mathImage = sourceImage
+                    } else {
+                        sliderImage = sourceImage
+                    }
+                    message = "${selectedType.title}截图已选择"
+                    messageIsError = false
+                    step = 2
                 } else {
-                    sliderImage = sourceImage
+                    dimensionError = "截图尺寸 ${bitmap.width} x ${bitmap.height}，与当前屏幕 ${imgScreenSize.width} x ${imgScreenSize.height} 不一致。请使用本机当前屏幕截图。"
                 }
-                message = "${pickedType.title}截图已选择"
-                messageIsError = false
             } catch (e: Exception) {
                 message = "读取截图失败：${e.message ?: "未知错误"}"
                 messageIsError = true
@@ -309,591 +299,438 @@ private fun CaptchaCalibrationScreen(
         }
     }
 
-    val currentRegions = if (selectedType.key == TYPE_MATH) mathRegions else sliderRegions
     val currentImage = if (selectedType.key == TYPE_MATH) mathImage else sliderImage
 
     Scaffold(
         containerColor = Color.White,
         topBar = {
-            TopAppBar(
-                title = { Text(text = "验证码校准") },
-                navigationIcon = {
-                    TextButton(
-                        onClick = onBack,
-                        colors = ButtonDefaults.textButtonColors(contentColor = AppPrimary)
-                    ) {
-                        Text(text = "返回")
-                    }
-                },
-                colors = TopAppBarDefaults.smallTopAppBarColors(
-                    containerColor = Color.White,
-                    titleContentColor = AppTextPrimary,
-                    navigationIconContentColor = AppPrimary
+            if (step < 2) {
+                TopAppBar(
+                    title = { Text(text = if (step == 0) "验证码校准" else "选择截图") },
+                    navigationIcon = {
+                        TextButton(
+                            onClick = { if (step > 0) step-- else onBack() },
+                            colors = ButtonDefaults.textButtonColors(contentColor = AppPrimary)
+                        ) {
+                            Text(text = if (step > 0) "返回" else "退出")
+                        }
+                    },
+                    colors = TopAppBarDefaults.smallTopAppBarColors(
+                        containerColor = Color.White,
+                        titleContentColor = AppTextPrimary,
+                        navigationIconContentColor = AppPrimary
+                    )
                 )
-            )
+            }
         }
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            CaptchaProfileStatusCard(
+        when (step) {
+            0 -> TypeSelectionStep(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
                 profile = profile,
-                profileError = profileError,
-                fileExists = fileExists,
-                screenReady = profileScreenReady,
-                screenText = "${screenSize.width} x ${screenSize.height}"
+                onSelectType = { key ->
+                    selectedTypeKey = key
+                    step = 1
+                }
             )
-            CaptchaTypeSelector(
-                selectedTypeKey = selectedTypeKey,
-                onSelectedTypeChange = { selectedTypeKey = it }
-            )
-            CaptchaAnnotationCard(
+            1 -> ImagePickStep(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
                 type = selectedType,
-                selectedItemKey = selectedItemKey,
-                onSelectedItemChange = { selectedItemKey = it },
-                sourceImage = currentImage,
-                regions = currentRegions,
-                screenSize = screenSize,
-                message = message,
-                messageIsError = messageIsError,
-                simulationText = simulationText,
-                simulationTextIsError = simulationTextIsError,
-                simulationRunning = simulationRunning,
-                onPickImage = {
-                    pendingPickTypeKey = selectedType.key
-                    imagePickerLauncher.launch("image/*")
-                },
-                onRegionChange = { key, region ->
-                    if (selectedType.key == TYPE_MATH) {
-                        mathRegions = mathRegions + (key to region)
-                    } else {
-                        sliderRegions = sliderRegions + (key to region)
-                    }
-                },
-                onClearSelected = {
-                    val key = selectedItemKey
-                    if (key != null) {
+                currentImage = currentImage,
+                onPickImage = { imagePickerLauncher.launch("image/*") },
+                onUseExisting = { step = 2 }
+            )
+            2 -> {
+                val currentRegions = if (selectedType.key == TYPE_MATH) mathRegions else sliderRegions
+                FullScreenAnnotateStep(
+                    sourceImage = currentImage,
+                    type = selectedType,
+                    regions = currentRegions,
+                    screenSize = screenSize,
+                    mathRegions = mathRegions,
+                    sliderRegions = sliderRegions,
+                    message = message,
+                    messageIsError = messageIsError,
+                    simulationText = simulationText,
+                    simulationTextIsError = simulationTextIsError,
+                    simulationRunning = simulationRunning,
+                    onBack = { step = 1 },
+                    onRegionChange = { key, region ->
+                        if (selectedType.key == TYPE_MATH) {
+                            mathRegions = mathRegions + (key to region)
+                        } else {
+                            sliderRegions = sliderRegions + (key to region)
+                        }
+                    },
+                    onDeleteRegion = { key ->
                         if (selectedType.key == TYPE_MATH) {
                             mathRegions = mathRegions - key
                         } else {
                             sliderRegions = sliderRegions - key
                         }
+                    },
+                    onSimulate = {
+                        val startResult = startSimulation(
+                            context = context,
+                            type = selectedType,
+                            screenSize = screenSize,
+                            sourceImage = currentImage,
+                            mathRegions = mathRegions,
+                            sliderRegions = sliderRegions
+                        )
+                        if (startResult == null) {
+                            simulationText = "${selectedType.title}模拟识别已启动"
+                            simulationTextIsError = false
+                            simulationRunning = true
+                            simulationRunId++
+                        } else {
+                            simulationText = startResult
+                            simulationTextIsError = true
+                        }
+                    },
+                    onSave = {
+                        val saveResult = saveCurrentProfile(
+                            context = context,
+                            type = selectedType,
+                            screenSize = screenSize,
+                            sourceImage = currentImage,
+                            mathRegions = mathRegions,
+                            sliderRegions = sliderRegions
+                        )
+                        if (saveResult == null) {
+                            message = "${selectedType.title}校准已保存"
+                            messageIsError = false
+                            toast(context, "验证码校准已保存")
+                            onProfileSaved()
+                            step = 0
+                        } else {
+                            message = saveResult
+                            messageIsError = true
+                        }
                     }
-                },
-                onClearRegion = { key ->
-                    if (selectedType.key == TYPE_MATH) {
-                        mathRegions = mathRegions - key
-                    } else {
-                        sliderRegions = sliderRegions - key
-                    }
-                },
-                onSimulate = {
-                    val startResult = startSimulation(
-                        context = context,
-                        type = selectedType,
-                        screenSize = screenSize,
-                        sourceImage = currentImage,
-                        mathRegions = mathRegions,
-                        sliderRegions = sliderRegions
-                    )
-                    if (startResult == null) {
-                        simulationText = "${selectedType.title}模拟识别已启动"
-                        simulationTextIsError = false
-                        simulationRunning = true
-                        simulationRunId++
-                    } else {
-                        simulationText = startResult
-                        simulationTextIsError = true
-                    }
-                },
-                onSave = {
-                    val saveResult = saveCurrentProfile(
-                        context = context,
-                        type = selectedType,
-                        screenSize = screenSize,
-                        sourceImage = currentImage,
-                        mathRegions = mathRegions,
-                        sliderRegions = sliderRegions
-                    )
-                    if (saveResult == null) {
-                        message = "${selectedType.title}校准已保存"
-                        messageIsError = false
-                        toast(context, "验证码校准已保存")
-                        onProfileSaved()
-                    } else {
-                        message = saveResult
-                        messageIsError = true
-                    }
-                }
-            )
-        }
-    }
-}
-
-@Composable
-private fun CaptchaProfileStatusCard(
-    profile: CaptchaCalibrationProfile?,
-    profileError: String?,
-    fileExists: Boolean,
-    screenReady: Boolean,
-    screenText: String
-) {
-    OutlinedCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = CardShape,
-        border = BorderStroke(1.dp, AppDivider),
-        colors = CardDefaults.outlinedCardColors(containerColor = Color.White)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Text(
-                text = "校准状态",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold
-            )
-            CalibrationStatusRow(
-                title = "配置文件",
-                description = if (fileExists) AutomationScripts.CAPTCHA_PROFILE_FILE_NAME else "未创建",
-                ready = fileExists
-            )
-            Divider()
-            CalibrationStatusRow(
-                title = "数学验证码",
-                description = profileRegionSummary(profile?.mathCompleted == true),
-                ready = profile?.mathCompleted == true
-            )
-            Divider()
-            CalibrationStatusRow(
-                title = "滑块验证码",
-                description = profileRegionSummary(profile?.sliderCompleted == true),
-                ready = profile?.sliderCompleted == true
-            )
-            Divider()
-            CalibrationStatusRow(
-                title = "屏幕尺寸",
-                description = profile?.let { "${it.deviceWidth} x ${it.deviceHeight}" } ?: screenText,
-                ready = screenReady
-            )
-            if (profileError != null) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = profileError,
-                    color = AppError,
-                    style = MaterialTheme.typography.bodySmall
                 )
             }
         }
     }
-}
 
-@Composable
-private fun CaptchaTypeSelector(
-    selectedTypeKey: String,
-    onSelectedTypeChange: (String) -> Unit
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        SelectableButton(
-            modifier = Modifier.weight(1f),
-            text = MathType.title,
-            selected = selectedTypeKey == TYPE_MATH,
-            onClick = { onSelectedTypeChange(TYPE_MATH) }
-        )
-        SelectableButton(
-            modifier = Modifier.weight(1f),
-            text = SliderType.title,
-            selected = selectedTypeKey == TYPE_SLIDER,
-            onClick = { onSelectedTypeChange(TYPE_SLIDER) }
+    if (dimensionError != null) {
+        AlertDialog(
+            onDismissRequest = { dimensionError = null },
+            title = { Text("截图尺寸不匹配") },
+            text = { Text(dimensionError!!) },
+            confirmButton = {
+                TextButton(onClick = { dimensionError = null }) {
+                    Text("知道了")
+                }
+            }
         )
     }
 }
 
+// ---------------------------------------------------------------------------
+// Step 0：类型选择页
+// ---------------------------------------------------------------------------
+
 @Composable
-private fun CaptchaAnnotationCard(
+private fun TypeSelectionStep(
+    modifier: Modifier,
+    profile: CaptchaCalibrationProfile?,
+    onSelectType: (String) -> Unit
+) {
+    Column(
+        modifier = modifier.padding(horizontal = 24.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "选择要校准的验证码类型",
+            style = MaterialTheme.typography.bodyLarge,
+            color = AppTextSecondary
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        TypeCard(
+            title = "数学验证码",
+            regionCount = 3,
+            completed = profile?.mathCompleted == true,
+            onClick = { onSelectType(TYPE_MATH) }
+        )
+        TypeCard(
+            title = "滑块验证码",
+            regionCount = 4,
+            completed = profile?.sliderCompleted == true,
+            onClick = { onSelectType(TYPE_SLIDER) }
+        )
+
+        Spacer(modifier = Modifier.weight(1f))
+        Text(
+            modifier = Modifier.fillMaxWidth(),
+            text = "点击卡片开始校准",
+            style = MaterialTheme.typography.bodySmall,
+            color = AppTextSecondary,
+            textAlign = TextAlign.Center
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+    }
+}
+
+@Composable
+private fun TypeCard(
+    title: String,
+    regionCount: Int,
+    completed: Boolean,
+    onClick: () -> Unit
+) {
+    OutlinedCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
+        shape = CardShape,
+        border = BorderStroke(
+            width = if (completed) 2.dp else 1.dp,
+            color = if (completed) AppPrimary else AppDivider
+        ),
+        colors = CardDefaults.outlinedCardColors(containerColor = Color.White)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "需要框选 ${regionCount} 个区域",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = AppTextSecondary
+                )
+            }
+            Text(
+                text = if (completed) "✓" else "✗",
+                color = if (completed) AppPrimary else AppError,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Step 1：截图选择页
+// ---------------------------------------------------------------------------
+
+@Composable
+private fun ImagePickStep(
+    modifier: Modifier,
     type: CalibrationType,
-    selectedItemKey: String?,
-    onSelectedItemChange: (String?) -> Unit,
+    currentImage: CaptchaSourceImage?,
+    onPickImage: () -> Unit,
+    onUseExisting: () -> Unit
+) {
+    Column(
+        modifier = modifier.padding(horizontal = 24.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Text(
+            text = type.title,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold
+        )
+
+        OutlinedCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .clickable { onPickImage() },
+            shape = CardShape,
+            border = BorderStroke(1.dp, AppDivider),
+            colors = CardDefaults.outlinedCardColors(containerColor = Color(0xFFF8F9FA))
+        ) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                if (currentImage != null) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Image(
+                            bitmap = currentImage.bitmap.asImageBitmap(),
+                            contentDescription = null,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(currentImage.bitmap.width.toFloat() / currentImage.bitmap.height.toFloat())
+                                .clip(CardShape),
+                            contentScale = ContentScale.Fit
+                        )
+                        Text(
+                            text = "尺寸 ${currentImage.displayName}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = AppPrimary
+                        )
+                    }
+                } else {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_add_white_48dp),
+                            contentDescription = null,
+                            modifier = Modifier.size(48.dp),
+                            tint = AppTextSecondary
+                        )
+                        Text(
+                            text = "点击选择截图",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = AppTextSecondary
+                        )
+                    }
+                }
+            }
+        }
+
+        Column(
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                modifier = Modifier.fillMaxWidth(),
+                text = "请使用本机当前屏幕截图，尺寸需与屏幕一致",
+                style = MaterialTheme.typography.bodySmall,
+                color = AppTextSecondary,
+                textAlign = TextAlign.Center
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                if (currentImage != null) {
+                    OutlinedButton(
+                        modifier = Modifier.weight(1f),
+                        onClick = onPickImage,
+                        shape = ButtonShape,
+                        border = BorderStroke(1.dp, AppPrimary.copy(alpha = 0.55f)),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = AppPrimary)
+                    ) {
+                        Text(text = "重新选择")
+                    }
+                    Button(
+                        modifier = Modifier.weight(1f),
+                        onClick = onUseExisting,
+                        shape = ButtonShape,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AppPrimary,
+                            contentColor = Color.White
+                        )
+                    ) {
+                        Text(text = "进入标注")
+                    }
+                } else {
+                    Button(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = onPickImage,
+                        shape = ButtonShape,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AppPrimary,
+                            contentColor = Color.White
+                        )
+                    ) {
+                        Text(text = "选择截图")
+                    }
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Step 2：全屏标注页
+// ---------------------------------------------------------------------------
+
+@Composable
+@Suppress("DEPRECATION")
+private fun FullScreenAnnotateStep(
     sourceImage: CaptchaSourceImage?,
+    type: CalibrationType,
     regions: Map<String, CaptchaRegion>,
     screenSize: CaptchaScreenSize,
+    mathRegions: Map<String, CaptchaRegion>,
+    sliderRegions: Map<String, CaptchaRegion>,
     message: String?,
     messageIsError: Boolean,
     simulationText: String?,
     simulationTextIsError: Boolean,
     simulationRunning: Boolean,
-    onPickImage: () -> Unit,
+    onBack: () -> Unit,
     onRegionChange: (String, CaptchaRegion) -> Unit,
-    onClearSelected: () -> Unit,
-    onClearRegion: (String) -> Unit,
+    onDeleteRegion: (String) -> Unit,
     onSimulate: () -> Unit,
     onSave: () -> Unit
 ) {
-    var fullScreenEditorOpen by remember { mutableStateOf(false) }
-    OutlinedCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = CardShape,
-        border = BorderStroke(1.dp, AppDivider),
-        colors = CardDefaults.outlinedCardColors(containerColor = Color.White)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = type.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = sourceImage?.displayName ?: "未选择截图",
-                        color = if (sourceImage == null) AppTextSecondary else AppPrimary,
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-                OutlinedButton(
-                    onClick = onPickImage,
-                    shape = ButtonShape,
-                    border = BorderStroke(1.dp, AppPrimary.copy(alpha = 0.55f)),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = AppPrimary)
-                ) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.ic_add_white_48dp),
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(text = "选择截图")
-                }
-            }
+    val context = LocalContext.current
+    val view = LocalView.current
+    FullScreenDialogEffect(context = context, dialogView = view)
 
-            CaptchaImageAnnotationCanvas(
-                sourceImage = sourceImage,
-                items = type.items,
-                selectedItemKey = selectedItemKey,
-                regions = regions,
-                onSelectedItemChange = onSelectedItemChange,
-                onFullScreenClick = { fullScreenEditorOpen = true }
-            )
+    val items = type.items
+    var selectedItemKey by rememberSaveable { mutableStateOf<String?>(null) }
 
-            DimensionsStatus(
-                sourceImage = sourceImage,
-                screenSize = screenSize
-            )
-
-            MissingItemsStatus(
-                items = type.items,
-                regions = regions
-            )
-
-            if (message != null) {
-                Text(
-                    text = message,
-                    color = if (messageIsError) AppError else AppPrimary,
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-            if (simulationText != null) {
-                Text(
-                    text = simulationText,
-                    color = if (simulationTextIsError) AppError else AppPrimary,
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                OutlinedButton(
-                    modifier = Modifier.weight(1f),
-                    onClick = onClearSelected,
-                    shape = ButtonShape,
-                    border = BorderStroke(1.dp, AppWarning.copy(alpha = 0.7f)),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = AppWarning)
-                ) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.ic_delete),
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(text = "清除")
-                }
-                OutlinedButton(
-                    modifier = Modifier.weight(1f),
-                    onClick = onSimulate,
-                    enabled = !simulationRunning,
-                    shape = ButtonShape,
-                    border = BorderStroke(1.dp, AppAccent.copy(alpha = 0.7f)),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = AppAccent)
-                ) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.ic_run),
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(text = if (simulationRunning) "识别中" else "模拟")
-                }
-                Button(
-                    modifier = Modifier.weight(1f),
-                    onClick = onSave,
-                    shape = ButtonShape,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = AppPrimary,
-                        contentColor = Color.White
-                    )
-                ) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.ic_save),
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(text = "保存当前")
-                }
-            }
-        }
-    }
-
-    val editorImage = sourceImage
-    if (fullScreenEditorOpen && editorImage != null) {
-        FullScreenRegionEditorDialog(
-            sourceImage = editorImage,
-            items = type.items,
-            selectedItemKey = selectedItemKey,
-            regions = regions,
-            onSelectedItemChange = { onSelectedItemChange(it) },
-            onRegionChange = onRegionChange,
-            onDeleteSelected = { key ->
-                if (regions[key] != null) {
-                    onClearRegion(key)
-                }
-            },
-            onDismiss = { fullScreenEditorOpen = false }
-        )
-    }
-}
-
-@Composable
-private fun AnnotationItemSelector(
-    items: List<AnnotationItem>,
-    selectedItemKey: String?,
-    regions: Map<String, CaptchaRegion>,
-    onSelectedItemChange: (String) -> Unit
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        items.chunked(2).forEach { rowItems ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                rowItems.forEach { item ->
-                    val completed = regions[item.key]?.isValid == true
-                    AnnotationButton(
-                        modifier = Modifier.weight(1f),
-                        item = item,
-                        selected = item.key == selectedItemKey,
-                        completed = completed,
-                        onClick = { onSelectedItemChange(item.key) }
-                    )
-                }
-                if (rowItems.size == 1) {
-                    Spacer(modifier = Modifier.weight(1f))
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun AnnotationButton(
-    modifier: Modifier,
-    item: AnnotationItem,
-    selected: Boolean,
-    completed: Boolean,
-    onClick: () -> Unit
-) {
-    val color = if (completed) item.color else AppPrimary
-    if (selected) {
-        Button(
-            modifier = modifier,
-            onClick = onClick,
-            shape = ButtonShape,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = color,
-                contentColor = Color.White
-            )
-        ) {
-            Text(text = item.title)
-        }
-    } else {
-        OutlinedButton(
-            modifier = modifier,
-            onClick = onClick,
-            shape = ButtonShape,
-            border = BorderStroke(1.dp, color.copy(alpha = 0.65f)),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = color)
-        ) {
-            Text(text = item.title)
-        }
-    }
-}
-
-@Composable
-private fun AnnotationOverlayControls(
-    modifier: Modifier,
-    items: List<AnnotationItem>,
-    selectedItemKey: String?,
-    regions: Map<String, CaptchaRegion>,
-    fullScreen: Boolean,
-    fullScreenEnabled: Boolean,
-    onSelectedItemChange: (String) -> Unit,
-    onFullScreenClick: () -> Unit
-) {
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(8.dp),
-        color = Color.White.copy(alpha = 0.92f),
-        border = BorderStroke(1.dp, Color.Black.copy(alpha = 0.08f))
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 6.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+    // 进入时自动选中第一个未完成的区域，或第一个区域
+    LaunchedEffect(type.key) {
+        val firstMissing = items.firstOrNull { regions[it.key]?.isValid != true }
+        selectedItemKey = firstMissing?.key ?: items.firstOrNull()?.key
+        // 自动放置默认区域
+        if (sourceImage != null) {
             items.forEach { item ->
-                val completed = regions[item.key]?.isValid == true
-                val selected = item.key == selectedItemKey
-                val color = if (completed) item.color else AppPrimary
-                if (selected) {
-                    Button(
-                        modifier = Modifier.height(34.dp),
-                        onClick = { onSelectedItemChange(item.key) },
-                        shape = ButtonShape,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = color,
-                            contentColor = Color.White
-                        ),
-                        contentPadding = ButtonDefaults.TextButtonContentPadding
-                    ) {
-                        Text(text = item.title, style = MaterialTheme.typography.labelSmall)
-                    }
-                } else {
-                    OutlinedButton(
-                        modifier = Modifier.height(34.dp),
-                        onClick = { onSelectedItemChange(item.key) },
-                        shape = ButtonShape,
-                        border = BorderStroke(1.dp, color.copy(alpha = 0.65f)),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = color),
-                        contentPadding = ButtonDefaults.TextButtonContentPadding
-                    ) {
-                        Text(text = item.title, style = MaterialTheme.typography.labelSmall)
-                    }
+                if (regions[item.key]?.isValid != true) {
+                    onRegionChange(item.key, defaultRegionForItem(item.key, sourceImage.bitmap))
                 }
-            }
-            OutlinedButton(
-                modifier = Modifier.height(34.dp),
-                onClick = onFullScreenClick,
-                enabled = fullScreenEnabled,
-                shape = ButtonShape,
-                border = BorderStroke(1.dp, AppAccent.copy(alpha = 0.75f)),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = AppAccent),
-                contentPadding = ButtonDefaults.TextButtonContentPadding
-            ) {
-                Text(
-                    text = if (fullScreen) "退出全屏" else "全屏",
-                    style = MaterialTheme.typography.labelSmall
-                )
             }
         }
     }
-}
 
-@Composable
-private fun CaptchaImageAnnotationCanvas(
-    sourceImage: CaptchaSourceImage?,
-    items: List<AnnotationItem>,
-    selectedItemKey: String?,
-    regions: Map<String, CaptchaRegion>,
-    onSelectedItemChange: (String) -> Unit,
-    onFullScreenClick: () -> Unit
-) {
+    val selectedItem = selectedItemKey?.let { key -> items.firstOrNull { it.key == key } }
+    val allCompleted = items.all { regions[it.key]?.isValid == true }
+
     if (sourceImage == null) {
         Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(220.dp)
-                .border(BorderStroke(1.dp, AppDivider), CardShape)
-                .background(Color(0xFFF8F9FA), CardShape),
+            modifier = Modifier.fillMaxSize().background(Color.Black),
             contentAlignment = Alignment.Center
         ) {
-            Text(
-                text = "未选择截图",
-                color = AppTextSecondary,
-                style = MaterialTheme.typography.bodyMedium
-            )
+            Text("未选择截图", color = Color.White)
         }
         return
     }
 
-    var canvasSize by remember { mutableStateOf(IntSize.Zero) }
-    val bitmap = sourceImage.bitmap
-
     Box(
         modifier = Modifier
-            .fillMaxWidth()
-            .aspectRatio(bitmap.width.toFloat() / bitmap.height.toFloat())
-            .border(BorderStroke(1.dp, AppDivider), CardShape)
-            .onSizeChanged { canvasSize = it }
+            .fillMaxSize()
+            .background(Color.Black)
     ) {
-        Image(
-            bitmap = bitmap.asImageBitmap(),
-            contentDescription = null,
+        FullScreenRegionCanvas(
             modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.FillBounds
+            sourceImage = sourceImage,
+            items = items,
+            selectedItem = selectedItem,
+            regions = regions,
+            onRegionChange = onRegionChange,
+            onDeleteSelected = { key -> onDeleteRegion(key) }
         )
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val itemByKey = items.associateBy { it.key }
-            val selectedKey = selectedItemKey
-            regions.forEach { (key, region) ->
-                if (key == selectedKey) {
-                    return@forEach
-                }
-                val item = itemByKey[key] ?: return@forEach
-                val rect = regionToDisplayRect(region, canvasSize, bitmap) ?: return@forEach
-                drawAnnotationRect(rect, item)
-            }
-            if (selectedKey != null) {
-                val selectedItem = itemByKey[selectedKey]
-                val selectedRegion = regions[selectedKey]
-                val selectedRect = selectedRegion?.let { regionToDisplayRect(it, canvasSize, bitmap) }
-                if (selectedItem != null && selectedRect != null) {
-                    drawAnnotationRect(selectedRect, selectedItem)
-                    drawSelectionHandles(selectedRect, selectedItem)
-                }
-            }
-        }
-        AnnotationOverlayControls(
+
+        // 顶部步骤指示器
+        StepIndicator(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
@@ -901,121 +738,165 @@ private fun CaptchaImageAnnotationCanvas(
             items = items,
             selectedItemKey = selectedItemKey,
             regions = regions,
-            fullScreen = false,
-            fullScreenEnabled = true,
-            onSelectedItemChange = onSelectedItemChange,
-            onFullScreenClick = onFullScreenClick
+            onSelectedItemChange = { selectedItemKey = it }
         )
+
+        // 底部操作栏
+        Surface(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth(),
+            color = Color.Black.copy(alpha = 0.85f)
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // 状态信息
+                if (message != null) {
+                    Text(
+                        text = message,
+                        color = if (messageIsError) AppError else AppPrimary,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                if (simulationText != null) {
+                    Text(
+                        text = simulationText,
+                        color = if (simulationTextIsError) AppError else AppPrimary,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedButton(
+                        modifier = Modifier.weight(1f),
+                        onClick = onBack,
+                        shape = ButtonShape,
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.5f)),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                    ) {
+                        Text(text = "上一步")
+                    }
+                    if (allCompleted) {
+                        Button(
+                            modifier = Modifier.weight(1f),
+                            onClick = onSave,
+                            shape = ButtonShape,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = AppPrimary,
+                                contentColor = Color.White
+                            )
+                        ) {
+                            Text(text = "保存并返回")
+                        }
+                    } else {
+                        Button(
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                val currentIdx = items.indexOfFirst { it.key == selectedItemKey }
+                                val nextMissing = items.drop(currentIdx + 1)
+                                    .firstOrNull { regions[it.key]?.isValid != true }
+                                    ?: items.firstOrNull { regions[it.key]?.isValid != true }
+                                selectedItemKey = nextMissing?.key
+                            },
+                            shape = ButtonShape,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = AppPrimary,
+                                contentColor = Color.White
+                            )
+                        ) {
+                            Text(text = "完成此区域")
+                        }
+                    }
+                    OutlinedButton(
+                        modifier = Modifier.weight(1f),
+                        onClick = onSimulate,
+                        enabled = !simulationRunning && allCompleted,
+                        shape = ButtonShape,
+                        border = BorderStroke(1.dp, AppAccent.copy(alpha = 0.7f)),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = AppAccent)
+                    ) {
+                        Text(text = if (simulationRunning) "识别中" else "模拟验证")
+                    }
+                }
+            }
+        }
     }
 }
 
+// ---------------------------------------------------------------------------
+// 步骤指示器
+// ---------------------------------------------------------------------------
+
 @Composable
-@Suppress("DEPRECATION")
-private fun FullScreenRegionEditorDialog(
-    sourceImage: CaptchaSourceImage,
+private fun StepIndicator(
+    modifier: Modifier,
     items: List<AnnotationItem>,
     selectedItemKey: String?,
     regions: Map<String, CaptchaRegion>,
-    onSelectedItemChange: (String) -> Unit,
-    onRegionChange: (String, CaptchaRegion) -> Unit,
-    onDeleteSelected: (String) -> Unit,
-    onDismiss: () -> Unit
+    onSelectedItemChange: (String) -> Unit
 ) {
-    val selectedItem = selectedItemKey?.let { key -> items.firstOrNull { it.key == key } }
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(
-            usePlatformDefaultWidth = false,
-            decorFitsSystemWindows = false
-        )
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(8.dp),
+        color = Color.Black.copy(alpha = 0.7f)
     ) {
-        val context = LocalContext.current
-        val dialogView = LocalView.current
-        FullScreenDialogEffect(context = context, dialogView = dialogView)
-        Surface(
-            modifier = Modifier.fillMaxSize(),
-            color = Color.Black
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black)
-            ) {
-                FullScreenRegionCanvas(
-                    modifier = Modifier.fillMaxSize(),
-                    sourceImage = sourceImage,
-                    items = items,
-                    selectedItem = selectedItem,
-                    regions = regions,
-                    onRegionChange = onRegionChange,
-                    onDeleteSelected = onDeleteSelected
-                )
-                AnnotationOverlayControls(
+            items.forEachIndexed { index, item ->
+                val completed = regions[item.key]?.isValid == true
+                val selected = item.key == selectedItemKey
+                if (index > 0) {
+                    Text(
+                        text = "→",
+                        color = Color.White.copy(alpha = 0.5f),
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+                Row(
                     modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .fillMaxWidth()
-                        .padding(8.dp),
-                    items = items,
-                    selectedItemKey = selectedItemKey,
-                    regions = regions,
-                    fullScreen = true,
-                    fullScreenEnabled = true,
-                    onSelectedItemChange = onSelectedItemChange,
-                    onFullScreenClick = onDismiss
-                )
+                        .clickable { onSelectedItemChange(item.key) }
+                        .background(
+                            color = when {
+                                selected -> item.color
+                                completed -> item.color.copy(alpha = 0.3f)
+                                else -> Color.Transparent
+                            },
+                            shape = RoundedCornerShape(4.dp)
+                        )
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = if (completed) "✓" else "${index + 1}",
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = item.shortTitle,
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
             }
         }
     }
 }
 
-@Composable
-@Suppress("DEPRECATION")
-private fun FullScreenDialogEffect(
-    context: Context,
-    dialogView: View
-) {
-    DisposableEffect(dialogView) {
-        val activity = context.findActivity()
-        val activityDecorView = activity?.window?.decorView
-        val dialogWindow = (dialogView.parent as? DialogWindowProvider)?.window
-        val dialogDecorView = dialogWindow?.decorView
-        val previousActivityVisibility = activityDecorView?.systemUiVisibility
-        val previousDialogVisibility = dialogDecorView?.systemUiVisibility
-        val previousDialogFlags = dialogWindow?.attributes?.flags ?: 0
-        val hadFullscreenFlag = activity?.window?.attributes?.flags
-            ?.let { it and WindowManager.LayoutParams.FLAG_FULLSCREEN != 0 } == true
-        val fullscreenFlags = immersiveFullscreenFlags()
-        val fullscreenWindowFlags = WindowManager.LayoutParams.FLAG_FULLSCREEN or
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
-
-        activity?.window?.setFlags(
-            WindowManager.LayoutParams.FLAG_FULLSCREEN,
-            WindowManager.LayoutParams.FLAG_FULLSCREEN
-        )
-        activityDecorView?.systemUiVisibility = fullscreenFlags
-        dialogWindow?.setLayout(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.MATCH_PARENT
-        )
-        dialogWindow?.setFlags(fullscreenWindowFlags, fullscreenWindowFlags)
-        dialogDecorView?.systemUiVisibility = fullscreenFlags
-
-        onDispose {
-            if (activityDecorView != null && previousActivityVisibility != null) {
-                activityDecorView.systemUiVisibility = previousActivityVisibility
-            }
-            if (dialogDecorView != null && previousDialogVisibility != null) {
-                dialogDecorView.systemUiVisibility = previousDialogVisibility
-            }
-            dialogWindow?.clearFlags(fullscreenWindowFlags)
-            dialogWindow?.setFlags(previousDialogFlags and fullscreenWindowFlags, fullscreenWindowFlags)
-            if (activity != null && !hadFullscreenFlag) {
-                activity.window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
-            }
-        }
-    }
-}
+// ---------------------------------------------------------------------------
+// 全屏画布（复用原有手势逻辑 + 长按删除）
+// ---------------------------------------------------------------------------
 
 @Composable
 private fun FullScreenRegionCanvas(
@@ -1061,6 +942,17 @@ private fun FullScreenRegionCanvas(
                                 gapPx = deleteGap
                             ).contains(offset)
                         ) {
+                            onDeleteSelected(activeItem.key)
+                            editMode = RegionEditMode.None
+                            dragStart = null
+                            dragCurrent = null
+                            gestureStart = null
+                            gestureBaseRegion = null
+                        }
+                    },
+                    onLongPress = {
+                        // 长按删除当前选中区域
+                        if (latestSelectedRegion != null) {
                             onDeleteSelected(activeItem.key)
                             editMode = RegionEditMode.None
                             dragStart = null
@@ -1176,9 +1068,7 @@ private fun FullScreenRegionCanvas(
             val itemByKey = items.associateBy { it.key }
             val selectedKey = selectedItem?.key
             regions.forEach { (key, region) ->
-                if (key == selectedKey) {
-                    return@forEach
-                }
+                if (key == selectedKey) return@forEach
                 val item = itemByKey[key] ?: return@forEach
                 val rect = regionToDisplayRect(region, canvasSize, bitmap) ?: return@forEach
                 drawAnnotationRect(rect, item)
@@ -1207,290 +1097,50 @@ private fun FullScreenRegionCanvas(
     }
 }
 
+// ---------------------------------------------------------------------------
+// 全屏沉浸式效果
+// ---------------------------------------------------------------------------
+
 @Composable
-private fun FloatingRegionAdjustPanel(
-    modifier: Modifier,
-    item: AnnotationItem,
-    region: CaptchaRegion?,
-    step: Int,
-    onStepChange: (Int) -> Unit,
-    onMove: (Int, Int) -> Unit,
-    onResize: (Int, Int) -> Unit,
-    onResetDefault: () -> Unit,
-    onReuseSize: () -> Unit,
-    reuseSizeEnabled: Boolean,
-    onPanelDrag: (Offset) -> Unit
+@Suppress("DEPRECATION")
+private fun FullScreenDialogEffect(
+    context: Context,
+    dialogView: View
 ) {
-    Surface(
-        modifier = modifier.width(218.dp),
-        shape = RoundedCornerShape(8.dp),
-        color = Color.White.copy(alpha = 0.94f),
-        border = BorderStroke(1.dp, item.color.copy(alpha = 0.55f))
-    ) {
-        Column(
-            modifier = Modifier.padding(8.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(item.color.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
-                    .padding(horizontal = 8.dp, vertical = 5.dp)
-                    .pointerInput(item.key) {
-                        detectDragGestures { _, dragAmount ->
-                            onPanelDrag(dragAmount)
-                        }
-                    },
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    modifier = Modifier.weight(1f),
-                    text = item.shortTitle,
-                    color = item.color,
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    text = "拖动",
-                    color = AppTextSecondary,
-                    style = MaterialTheme.typography.labelSmall
-                )
+    DisposableEffect(dialogView) {
+        val activity = context.findActivity()
+        val window = activity?.window
+        val decorView = window?.decorView
+        val previousVisibility = decorView?.systemUiVisibility
+        val previousFlags = window?.attributes?.flags ?: 0
+        val hadFullscreenFlag = previousFlags and WindowManager.LayoutParams.FLAG_FULLSCREEN != 0
+        val fullscreenFlags = immersiveFullscreenFlags()
+        val fullscreenWindowFlags = WindowManager.LayoutParams.FLAG_FULLSCREEN or
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+
+        window?.setFlags(
+            WindowManager.LayoutParams.FLAG_FULLSCREEN,
+            WindowManager.LayoutParams.FLAG_FULLSCREEN
+        )
+        decorView?.systemUiVisibility = fullscreenFlags
+        window?.addFlags(fullscreenWindowFlags)
+
+        onDispose {
+            if (decorView != null && previousVisibility != null) {
+                decorView.systemUiVisibility = previousVisibility
             }
-            Text(
-                text = region?.let { "x=${it.x} y=${it.y} w=${it.w} h=${it.h}" } ?: "未生成区域",
-                color = AppTextPrimary,
-                style = MaterialTheme.typography.labelSmall
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf(1, 5, 20).forEach { value ->
-                    StepButton(
-                        modifier = Modifier.weight(1f),
-                        text = "${value}px",
-                        selected = step == value,
-                        onClick = { onStepChange(value) }
-                    )
-                }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Spacer(modifier = Modifier.weight(1f))
-                AdjustButton(
-                    modifier = Modifier.weight(1f),
-                    text = "↑",
-                    onClick = { onMove(0, -step) }
-                )
-                Spacer(modifier = Modifier.weight(1f))
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                AdjustButton(
-                    modifier = Modifier.weight(1f),
-                    text = "←",
-                    onClick = { onMove(-step, 0) }
-                )
-                AdjustButton(
-                    modifier = Modifier.weight(1f),
-                    text = "↓",
-                    onClick = { onMove(0, step) }
-                )
-                AdjustButton(
-                    modifier = Modifier.weight(1f),
-                    text = "→",
-                    onClick = { onMove(step, 0) }
-                )
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                AdjustButton(
-                    modifier = Modifier.weight(1f),
-                    text = "宽-",
-                    onClick = { onResize(-step * 2, 0) }
-                )
-                AdjustButton(
-                    modifier = Modifier.weight(1f),
-                    text = "宽+",
-                    onClick = { onResize(step * 2, 0) }
-                )
-                AdjustButton(
-                    modifier = Modifier.weight(1f),
-                    text = "高-",
-                    onClick = { onResize(0, -step * 2) }
-                )
-                AdjustButton(
-                    modifier = Modifier.weight(1f),
-                    text = "高+",
-                    onClick = { onResize(0, step * 2) }
-                )
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                AdjustButton(
-                    modifier = Modifier.weight(1f),
-                    text = "默认",
-                    onClick = onResetDefault
-                )
-                AdjustButton(
-                    modifier = Modifier.weight(1f),
-                    text = "同尺寸",
-                    enabled = reuseSizeEnabled,
-                    onClick = onReuseSize
-                )
+            window?.clearFlags(fullscreenWindowFlags)
+            if (!hadFullscreenFlag) {
+                window?.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
             }
         }
     }
 }
 
-@Composable
-private fun StepButton(
-    modifier: Modifier,
-    text: String,
-    selected: Boolean,
-    onClick: () -> Unit
-) {
-    if (selected) {
-        Button(
-            modifier = modifier.height(32.dp),
-            onClick = onClick,
-            shape = ButtonShape,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = AppPrimary,
-                contentColor = Color.White
-            ),
-            contentPadding = ButtonDefaults.TextButtonContentPadding
-        ) {
-            Text(text = text, style = MaterialTheme.typography.labelSmall)
-        }
-    } else {
-        OutlinedButton(
-            modifier = modifier.height(32.dp),
-            onClick = onClick,
-            shape = ButtonShape,
-            border = BorderStroke(1.dp, AppPrimary.copy(alpha = 0.55f)),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = AppPrimary),
-            contentPadding = ButtonDefaults.TextButtonContentPadding
-        ) {
-            Text(text = text, style = MaterialTheme.typography.labelSmall)
-        }
-    }
-}
-
-@Composable
-private fun AdjustButton(
-    modifier: Modifier,
-    text: String,
-    enabled: Boolean = true,
-    onClick: () -> Unit
-) {
-    OutlinedButton(
-        modifier = modifier.height(32.dp),
-        onClick = onClick,
-        enabled = enabled,
-        shape = ButtonShape,
-        border = BorderStroke(1.dp, AppTextSecondary.copy(alpha = 0.35f)),
-        colors = ButtonDefaults.outlinedButtonColors(contentColor = AppTextPrimary),
-        contentPadding = ButtonDefaults.TextButtonContentPadding
-    ) {
-        Text(text = text, style = MaterialTheme.typography.labelSmall)
-    }
-}
-
-@Composable
-private fun DimensionsStatus(
-    sourceImage: CaptchaSourceImage?,
-    screenSize: CaptchaScreenSize
-) {
-    val ready = sourceImage?.let {
-        it.bitmap.width == screenSize.width && it.bitmap.height == screenSize.height
-    } == true
-    val text = sourceImage?.let {
-        "截图 ${it.bitmap.width} x ${it.bitmap.height}，当前屏幕 ${screenSize.width} x ${screenSize.height}"
-    } ?: "当前屏幕 ${screenSize.width} x ${screenSize.height}"
-    Text(
-        text = text,
-        color = when {
-            sourceImage == null -> AppTextSecondary
-            ready -> AppPrimary
-            else -> AppError
-        },
-        style = MaterialTheme.typography.bodySmall
-    )
-}
-
-@Composable
-private fun MissingItemsStatus(
-    items: List<AnnotationItem>,
-    regions: Map<String, CaptchaRegion>
-) {
-    val missing = missingItems(items, regions)
-    Text(
-        text = if (missing.isEmpty()) "必填区域已完成" else "未完成：${missing.joinToString("、")}",
-        color = if (missing.isEmpty()) AppPrimary else AppTextSecondary,
-        style = MaterialTheme.typography.bodySmall
-    )
-}
-
-@Composable
-private fun CalibrationStatusRow(
-    title: String,
-    description: String,
-    ready: Boolean
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = if (ready) "已完成" else "未完成",
-                    color = if (ready) AppPrimary else AppError,
-                    style = MaterialTheme.typography.labelMedium
-                )
-            }
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = description,
-                color = AppTextSecondary,
-                style = MaterialTheme.typography.bodySmall
-            )
-        }
-    }
-}
-
-@Composable
-private fun SelectableButton(
-    modifier: Modifier,
-    text: String,
-    selected: Boolean,
-    onClick: () -> Unit
-) {
-    if (selected) {
-        Button(
-            modifier = modifier,
-            onClick = onClick,
-            shape = ButtonShape,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = AppPrimary,
-                contentColor = Color.White
-            )
-        ) {
-            Text(text = text)
-        }
-    } else {
-        OutlinedButton(
-            modifier = modifier,
-            onClick = onClick,
-            shape = ButtonShape,
-            border = BorderStroke(1.dp, AppPrimary.copy(alpha = 0.55f)),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = AppPrimary)
-        ) {
-            Text(text = text)
-        }
-    }
-}
+// ---------------------------------------------------------------------------
+// 绘制函数
+// ---------------------------------------------------------------------------
 
 private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawAnnotationRect(
     rect: Rect,
@@ -1586,6 +1236,10 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawDeleteHandle(
         strokeWidth = crossStroke
     )
 }
+
+// ---------------------------------------------------------------------------
+// 模拟与保存
+// ---------------------------------------------------------------------------
 
 private fun startSimulation(
     context: Context,
@@ -1724,9 +1378,7 @@ private fun formatSimulationResult(json: JSONObject): Pair<String, Boolean> {
 }
 
 private fun pointJsonText(json: JSONObject?): String {
-    if (json == null) {
-        return "(无)"
-    }
+    if (json == null) return "(无)"
     return "(${json.optInt("x")},${json.optInt("y")})"
 }
 
@@ -1795,6 +1447,10 @@ private fun saveCurrentProfile(
         e.message ?: "验证码校准保存失败"
     }
 }
+
+// ---------------------------------------------------------------------------
+// 工具函数
+// ---------------------------------------------------------------------------
 
 private fun decodeBitmap(context: Context, uri: Uri): Bitmap {
     val options = BitmapFactory.Options().apply {
@@ -1943,42 +1599,6 @@ private fun clampRegion(region: CaptchaRegion, bitmap: Bitmap): CaptchaRegion {
     val x = region.x.coerceIn(0, (bitmap.width - w).coerceAtLeast(0))
     val y = region.y.coerceIn(0, (bitmap.height - h).coerceAtLeast(0))
     return CaptchaRegion(x = x, y = y, w = w, h = h)
-}
-
-private fun reusableSizeRegion(
-    selectedKey: String,
-    items: List<AnnotationItem>,
-    regions: Map<String, CaptchaRegion>
-): CaptchaRegion? {
-    val beforeSelected = items
-        .takeWhile { it.key != selectedKey }
-        .mapNotNull { regions[it.key] }
-        .lastOrNull { it.isValid }
-    return beforeSelected ?: items
-        .filter { it.key != selectedKey }
-        .mapNotNull { regions[it.key] }
-        .firstOrNull { it.isValid }
-}
-
-private fun reuseRegionSize(
-    selectedKey: String,
-    items: List<AnnotationItem>,
-    regions: Map<String, CaptchaRegion>,
-    bitmap: Bitmap
-): CaptchaRegion? {
-    val source = reusableSizeRegion(selectedKey, items, regions) ?: return null
-    val current = regions[selectedKey] ?: defaultRegionForItem(selectedKey, bitmap)
-    val centerX = current.x + current.w / 2f
-    val centerY = current.y + current.h / 2f
-    return clampRegion(
-        CaptchaRegion(
-            x = (centerX - source.w / 2f).roundToInt(),
-            y = (centerY - source.h / 2f).roundToInt(),
-            w = source.w,
-            h = source.h
-        ),
-        bitmap
-    )
 }
 
 private fun Context.findActivity(): Activity? {
@@ -2195,14 +1815,6 @@ private fun regionsFromSliderProfile(profile: CaptchaSliderProfile?): Map<String
     profile?.trackRegion?.let { regions[KEY_SLIDER_TRACK] = it }
     profile?.submitRegion?.let { regions[KEY_SLIDER_SUBMIT] = it }
     return regions
-}
-
-private fun profileRegionSummary(markedCompleted: Boolean): String {
-    return if (markedCompleted) {
-        "已写入必填区域"
-    } else {
-        "未写入必填区域"
-    }
 }
 
 private fun toast(context: Context, message: String) {
