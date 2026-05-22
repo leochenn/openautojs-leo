@@ -1,1 +1,1 @@
-adb shell rm -rf /sdcard/OpenAutoJS_NanJingBooking
+adb shell rm -rf /sdcard/OpenAutoJS_NanjingBooking
