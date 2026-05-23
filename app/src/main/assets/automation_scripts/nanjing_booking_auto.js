@@ -55,14 +55,14 @@ var CONFIG = {
             packageName: "", // 留空时使用当前 OpenAutoJS 包名；不要填 Mock App 或微信包名
             action: "org.openautojs.autojs.action.CAPTCHA_IME_SET_ANSWER", // OpenAutoJS 验证码输入法接收答案的广播 action
             extraAnswer: "answer", // 广播中携带验证码答案的 extra key
-            focusWaitMs: 200, // 点击验证码输入框后等待焦点/输入连接建立；偶发不输入可调到 400-600
+            focusWaitMs: 150, // 点击验证码输入框后等待焦点/输入连接建立；偶发不输入可调到 400-600
             afterBroadcastMs: 30, // 发送广播后给 receiver 一个极短处理窗口，一般无需调整
             commitWaitMs: 200, // 等待 IME commitText 完成；已验证 350ms 可完成，正式偶发不输入可调到 800-1200
         },
         submitPoint: { x: 720, y: 2216 },
         autoSubmitAfterInput: true,
         skipFinalSubmit: true, // true 时只完成验证码输入/滑块拖动，不点击弹窗最后的“确定”，用于正式前观察验证
-        afterInputMs: 200, // IME 输入完成后、收起键盘前的缓冲；正式抢票建议 150-300，肉眼观察可临时调大
+        afterInputMs: 300, // IME 输入完成后、收起键盘前的缓冲；正式抢票建议 150-300，肉眼观察可临时调大
         afterKeyboardBackMs: 50, // back 收起键盘后的缓冲；若确定按钮被键盘遮挡或点击过早，可调到 400-600
         preferOcr: true,
         rawOcrEnabled: false, // false 时数学验证码不跑原图 OCR，直接走预处理 OCR；true 时恢复原图 OCR 优先机制

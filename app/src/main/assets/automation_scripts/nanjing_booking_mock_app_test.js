@@ -42,7 +42,7 @@ var CONFIG = {
         submitPoint: { x: 720, y: 2216 },
         autoSubmitAfterInput: true,
         skipFinalSubmit: false, // true 时只完成验证码输入/滑块拖动，不点击弹窗最后的“确定”，用于正式前观察验证
-        afterInputMs: 200, // 与正式脚本第二轮保持一致：IME 输入完成后、收起键盘前的缓冲
+        afterInputMs: 300, // 与正式脚本第二轮保持一致：IME 输入完成后、收起键盘前的缓冲
         afterKeyboardBackMs: 250, // 与正式脚本第二轮保持一致：back 收起键盘后的缓冲
         preferOcr: true,
         rawOcrEnabled: false, // false 时数学验证码不跑原图 OCR，直接走预处理 OCR；true 时恢复原图 OCR 优先机制
@@ -993,23 +993,13 @@ function analyzeCaptchaExpressionPrefix(prefix) {
     if (text.length === 0) {
         return {};
     }
-    if (/[0-9]/.test(text)) {
-        return { suspicious: "ocr_prefix_has_digit", ignoredPrefix: text };
-    }
-    if (/[A-Za-z\u4e00-\u9fff]/.test(text)) {
-        return { suspicious: "ocr_prefix_has_text", ignoredPrefix: text };
-    }
-    if (text.length > 4) {
-        return { suspicious: "ocr_prefix_noise_too_long", ignoredPrefix: text };
-    }
-    if (/^[=?+\-\u00d7\u00f7:\/\.\u3002\uff0e,\uff0c]+$/.test(text)) {
-        return {
-            rule: "ignore_prefix_operator_marker_noise",
-            prefixNoiseIgnored: true,
-            ignoredPrefix: text
-        };
-    }
-    return { suspicious: "ocr_prefix_noise", ignoredPrefix: text };
+    // \u57fa\u4e8e"\u64cd\u4f5c\u6570<100"\u7ea6\u675f\uff0c\d{1,2} \u5339\u914d\u5230\u7684 x op y \u5df2\u662f\u5408\u6cd5\u8868\u8fbe\u5f0f\uff0c
+    // prefix \u4e2d\u7684\u4efb\u4f55\u5b57\u7b26\u90fd\u4e0d\u53ef\u80fd\u662f\u5408\u6cd5\u64cd\u4f5c\u6570\u7684\u4e00\u90e8\u5206\uff0c\u5b89\u5168\u5ffd\u7565\u3002
+    return {
+        rule: "ignore_prefix_as_noise",
+        prefixNoiseIgnored: true,
+        ignoredPrefix: text
+    };
 }
 
 function attachInferredCaptchaContext(parsed, normalized) {
