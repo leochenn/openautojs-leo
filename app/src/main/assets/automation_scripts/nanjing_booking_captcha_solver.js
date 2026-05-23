@@ -1359,6 +1359,156 @@ function createNanjingBookingCaptchaSolver(deps) {
             " columnRatio=" + best.columnRatio);
     }
 
+    function isPollutedComponentPixel(color) {
+        var cfg = CONFIG.captcha.slider;
+        var br = sliderBrightness(color);
+        var ch = sliderChroma(color);
+        return br >= (cfg.pollutedComponentBrightnessMin || 185) &&
+            br <= (cfg.pollutedComponentBrightnessMax || 246) &&
+            ch <= (cfg.pollutedComponentChromaMax || 32);
+    }
+
+    function recognizeSliderByPollutedComponents(img, region, pixelAt) {
+        var cfg = CONFIG.captcha.slider;
+        var step = cfg.pollutedComponentStep || 10;
+        var yStart = Math.round(region.h * (cfg.pollutedComponentYStartRatio || 0.30));
+        var yEnd = Math.round(region.h * (cfg.pollutedComponentYEndRatio || 0.86));
+        var gridW = Math.ceil(region.w / step);
+        var gridH = Math.ceil((yEnd - yStart) / step);
+        var minCells = cfg.pollutedComponentMinCells || 12;
+        var minSide = scaleX((cfg.minSide || 90) * (cfg.pollutedComponentMinSideRatio || 0.75));
+        var maxSide = scaleX((cfg.maxSide || 215) * (cfg.pollutedComponentMaxSideRatio || 1.12));
+        var minCenterX = region.x + region.w * (cfg.pollutedFallbackMinCenterRatio || 0.30);
+        var minFillRatio = cfg.pollutedComponentMinFillRatio || 0.45;
+        var minGrayRatio = cfg.pollutedComponentMinGrayRatio || 0.55;
+        var minNeutralRatio = cfg.pollutedComponentMinNeutralRatio || 0.65;
+        var maxDarkRatio = cfg.pollutedComponentMaxDarkRatio || 0.18;
+        var minScore = cfg.pollutedComponentMinScore || 70;
+        var mask = [];
+        var seen = [];
+        var gx;
+        var gy;
+        for (gy = 0; gy < gridH; gy++) {
+            mask[gy] = [];
+            seen[gy] = [];
+            for (gx = 0; gx < gridW; gx++) {
+                var px = region.x + gx * step;
+                var py = region.y + yStart + gy * step;
+                mask[gy][gx] = px < region.x + region.w && py < region.y + yEnd &&
+                    isPollutedComponentPixel(pixelAt(px, py));
+                seen[gy][gx] = false;
+            }
+        }
+
+        var candidates = [];
+        var rejected = 0;
+        var dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+        for (gy = 0; gy < gridH; gy++) {
+            for (gx = 0; gx < gridW; gx++) {
+                if (!mask[gy][gx] || seen[gy][gx]) continue;
+                var qx = [gx];
+                var qy = [gy];
+                var head = 0;
+                seen[gy][gx] = true;
+                var cells = 0;
+                var minGx = gx;
+                var maxGx = gx;
+                var minGy = gy;
+                var maxGy = gy;
+                while (head < qx.length) {
+                    var cx = qx[head];
+                    var cy = qy[head];
+                    head++;
+                    cells++;
+                    if (cx < minGx) minGx = cx;
+                    if (cx > maxGx) maxGx = cx;
+                    if (cy < minGy) minGy = cy;
+                    if (cy > maxGy) maxGy = cy;
+                    for (var di = 0; di < dirs.length; di++) {
+                        var nx = cx + dirs[di][0];
+                        var ny = cy + dirs[di][1];
+                        if (nx < 0 || ny < 0 || nx >= gridW || ny >= gridH) continue;
+                        if (!mask[ny][nx] || seen[ny][nx]) continue;
+                        seen[ny][nx] = true;
+                        qx.push(nx);
+                        qy.push(ny);
+                    }
+                }
+                if (cells < minCells) continue;
+                var boxX = region.x + minGx * step;
+                var boxY = region.y + yStart + minGy * step;
+                var boxW = (maxGx - minGx + 1) * step;
+                var boxH = (maxGy - minGy + 1) * step;
+                var centerX = boxX + boxW / 2;
+                var centerY = boxY + boxH / 2;
+                var shapeRatio = boxH ? boxW / boxH : 99;
+                var fillRatio = cells / ((maxGx - minGx + 1) * (maxGy - minGy + 1));
+                if (boxW < minSide || boxW > maxSide || boxH < minSide || boxH > maxSide ||
+                    shapeRatio < 0.45 || shapeRatio > 2.0 || centerX < minCenterX || fillRatio < minFillRatio) {
+                    rejected++;
+                    continue;
+                }
+
+                var total = 0;
+                var neutral = 0;
+                var gray = 0;
+                var dark = 0;
+                for (var yy = boxY; yy < Math.min(boxY + boxH, region.y + yEnd); yy += step) {
+                    for (var xx = boxX; xx < Math.min(boxX + boxW, region.x + region.w); xx += step) {
+                        var color = pixelAt(xx, yy);
+                        var br = sliderBrightness(color);
+                        var ch = sliderChroma(color);
+                        total++;
+                        if (br >= 150 && br <= 252 && ch <= 65) neutral++;
+                        if (isPollutedComponentPixel(color)) gray++;
+                        if (br < 70) dark++;
+                    }
+                }
+                var neutralRatio = total ? neutral / total : 0;
+                var grayRatio = total ? gray / total : 0;
+                var darkRatio = total ? dark / total : 1;
+                var score = fillRatio * 45 + grayRatio * 45 + neutralRatio * 20 - darkRatio * 50 -
+                    Math.abs(boxW - boxH) * 0.08;
+                if (score < minScore || grayRatio < minGrayRatio || neutralRatio < minNeutralRatio || darkRatio > maxDarkRatio) {
+                    rejected++;
+                    continue;
+                }
+                candidates.push({
+                    x: boxX,
+                    y: boxY,
+                    w: boxW,
+                    h: boxH,
+                    area: boxW * boxH,
+                    centerX: centerX,
+                    centerY: centerY,
+                    score: score,
+                    fillRatio: fillRatio,
+                    grayRatio: grayRatio,
+                    neutralRatio: neutralRatio,
+                    darkRatio: darkRatio
+                });
+            }
+        }
+
+        if (candidates.length < 1) {
+            return { ok: false, reason: "polluted_component_candidates=0 rejected=" + rejected, boxes: [] };
+        }
+        candidates.sort(function (a, b) {
+            if (a.score !== b.score) return b.score - a.score;
+            return a.centerX - b.centerX;
+        });
+        var best = candidates[0];
+        return buildSliderResult(region, [best], "polluted_component",
+            "score=" + best.score.toFixed(1) +
+            " fill=" + best.fillRatio.toFixed(2) +
+            " gray=" + best.grayRatio.toFixed(2) +
+            " neutral=" + best.neutralRatio.toFixed(2) +
+            " dark=" + best.darkRatio.toFixed(2) +
+            " candidates=" + candidates.length +
+            " rejected=" + rejected +
+            " step=" + step);
+    }
+
     function pollutedEdgeScore(img, region, relX, yStart, yEnd, step, pixelAt) {
         relX = Math.round(relX);
         if (relX < step * 2) relX = step * 2;
@@ -1383,7 +1533,10 @@ function createNanjingBookingCaptchaSolver(deps) {
         var maxSide = scaleX((cfg.maxSide || 215) * 0.90);
         var minCenterX = region.x + region.w * (cfg.pollutedFallbackMinCenterRatio || 0.30);
         var minScore = cfg.pollutedFallbackMinScore || 70;
+        var minNeutralRatio = cfg.pollutedEdgeMinNeutralRatio || 0.62;
+        var maxDarkRatio = cfg.pollutedEdgeMaxDarkRatio || 0.25;
         var candidates = [];
+        var rejectedConfidence = 0;
         var edgeCache = {};
         function edgeAt(relX) {
             var key = Math.round(relX / step) * step;
@@ -1421,6 +1574,10 @@ function createNanjingBookingCaptchaSolver(deps) {
                 var darkRatio = total ? dark / total : 1;
                 var score = leftEdge + rightEdge + neutralRatio * 20 - darkRatio * 25;
                 if (score < minScore) continue;
+                if (neutralRatio < minNeutralRatio || darkRatio > maxDarkRatio) {
+                    rejectedConfidence++;
+                    continue;
+                }
                 candidates.push({
                     x: region.x + x1,
                     y: region.y + yStart,
@@ -1436,7 +1593,7 @@ function createNanjingBookingCaptchaSolver(deps) {
             }
         }
         if (candidates.length < 1) {
-            return { ok: false, reason: "polluted_edge_candidates=0", boxes: [] };
+            return { ok: false, reason: "polluted_edge_candidates=0 rejectedConfidence=" + rejectedConfidence, boxes: [] };
         }
         var preferredMaxCenterX = region.x + region.w * 0.70;
         var preferred = [];
@@ -1453,7 +1610,8 @@ function createNanjingBookingCaptchaSolver(deps) {
             "score=" + best.score.toFixed(1) +
             " neutral=" + best.neutralRatio.toFixed(2) +
             " dark=" + best.darkRatio.toFixed(2) +
-            " candidates=" + candidates.length);
+            " candidates=" + candidates.length +
+            " rejectedConfidence=" + rejectedConfidence);
     }
 
     function recognizeSliderByPollutedFallback(img, region, pixelAt) {
@@ -1461,10 +1619,12 @@ function createNanjingBookingCaptchaSolver(deps) {
         var bright = recognizeSliderByBrightColumns(img, region, pixelAt);
         var brightMaxCenterX = region.x + region.w * (cfg.pollutedBrightMaxCenterRatio || 0.72);
         if (bright.ok && bright.target && bright.target.centerX <= brightMaxCenterX) return bright;
+        var component = recognizeSliderByPollutedComponents(img, region, pixelAt);
+        if (component.ok) return component;
         var edge = recognizeSliderByPollutedEdges(img, region, pixelAt);
         if (edge.ok) return edge;
-        if (bright.ok) return bright;
-        return { ok: false, reason: bright.reason + " " + edge.reason, boxes: [] };
+        var brightReason = bright.ok ? "bright_too_far_right targetX=" + Math.round(bright.target.centerX) : bright.reason;
+        return { ok: false, reason: brightReason + " " + component.reason + " " + edge.reason, boxes: [] };
     }
 
     function detectSliderCaptchaByRegions(img, trackRegion, handleRegion, imageSearchRegion) {

@@ -47,6 +47,17 @@ CFG = {
     "pollutedBrightColumnStrongRatio": 0.48,
     "pollutedBrightColumnMinRatio": 0.28,
     "pollutedBrightMaxCenterRatio": 0.72,
+    "pollutedComponentStep": 10,
+    "pollutedComponentBrightnessMin": 185,
+    "pollutedComponentBrightnessMax": 246,
+    "pollutedComponentChromaMax": 32,
+    "pollutedComponentMinScore": 70,
+    "pollutedComponentMinFillRatio": 0.45,
+    "pollutedComponentMinGrayRatio": 0.55,
+    "pollutedComponentMinNeutralRatio": 0.65,
+    "pollutedComponentMaxDarkRatio": 0.18,
+    "pollutedEdgeMinNeutralRatio": 0.62,
+    "pollutedEdgeMaxDarkRatio": 0.25,
     "pollutedEdgeStep": 12,
     "pollutedFallbackMinScore": 70,
     "pollutedFallbackMinNeutralRatio": 0.68,
@@ -289,6 +300,121 @@ def polluted_bright_columns(img: Image.Image, profile: dict[str, Any]) -> dict[s
     return result_from_boxes(region, [pool[0]], "polluted_bright_columns")
 
 
+def polluted_component_pixel(color: tuple[int, int, int]) -> bool:
+    b = brightness(color)
+    return (
+        CFG["pollutedComponentBrightnessMin"] <= b <= CFG["pollutedComponentBrightnessMax"]
+        and chroma(color) <= CFG["pollutedComponentChromaMax"]
+    )
+
+
+def polluted_components(img: Image.Image, profile: dict[str, Any]) -> dict[str, Any]:
+    region = region_from(profile, "sliderProfile", "imageSearchRegion")
+    step = CFG["pollutedComponentStep"]
+    y_start = round(region["h"] * 0.30)
+    y_end = round(region["h"] * 0.86)
+    xs = list(range(0, region["w"], step))
+    ys = list(range(y_start, y_end, step))
+    width = len(xs)
+    height = len(ys)
+    mask = [
+        [
+            polluted_component_pixel(img.getpixel((region["x"] + x, region["y"] + y)))
+            for x in xs
+        ]
+        for y in ys
+    ]
+    seen = [[False for _ in range(width)] for _ in range(height)]
+    candidates: list[dict[str, Any]] = []
+    rejected = 0
+    min_side = round(CFG["minSide"] * 0.75)
+    max_side = round(CFG["maxSide"] * 1.12)
+    min_center = region["x"] + region["w"] * CFG["pollutedFallbackMinCenterRatio"]
+
+    for gy in range(height):
+        for gx in range(width):
+            if not mask[gy][gx] or seen[gy][gx]:
+                continue
+            queue = [(gx, gy)]
+            seen[gy][gx] = True
+            head = 0
+            cells: list[tuple[int, int]] = []
+            while head < len(queue):
+                cx, cy = queue[head]
+                head += 1
+                cells.append((cx, cy))
+                for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                    nx, ny = cx + dx, cy + dy
+                    if 0 <= nx < width and 0 <= ny < height and mask[ny][nx] and not seen[ny][nx]:
+                        seen[ny][nx] = True
+                        queue.append((nx, ny))
+            if len(cells) < 12:
+                continue
+            min_gx = min(x for x, _ in cells)
+            max_gx = max(x for x, _ in cells)
+            min_gy = min(y for _, y in cells)
+            max_gy = max(y for _, y in cells)
+            box_x = region["x"] + min_gx * step
+            box_y = region["y"] + y_start + min_gy * step
+            box_w = (max_gx - min_gx + 1) * step
+            box_h = (max_gy - min_gy + 1) * step
+            center_x = box_x + box_w / 2
+            center_y = box_y + box_h / 2
+            fill_ratio = len(cells) / ((max_gx - min_gx + 1) * (max_gy - min_gy + 1))
+            shape_ratio = box_w / box_h if box_h else 99
+            if (
+                box_w < min_side or box_w > max_side
+                or box_h < min_side or box_h > max_side
+                or shape_ratio < 0.45 or shape_ratio > 2.0
+                or center_x < min_center
+                or fill_ratio < CFG["pollutedComponentMinFillRatio"]
+            ):
+                rejected += 1
+                continue
+            neutral = gray = dark = total = 0
+            for yy in range(box_y, min(box_y + box_h, region["y"] + y_end), step):
+                for xx in range(box_x, min(box_x + box_w, region["x"] + region["w"]), step):
+                    color = img.getpixel((xx, yy))
+                    b = brightness(color)
+                    c = chroma(color)
+                    total += 1
+                    if 150 <= b <= 252 and c <= 65:
+                        neutral += 1
+                    if polluted_component_pixel(color):
+                        gray += 1
+                    if b < 70:
+                        dark += 1
+            neutral_ratio = neutral / total if total else 0.0
+            gray_ratio = gray / total if total else 0.0
+            dark_ratio = dark / total if total else 1.0
+            score = fill_ratio * 45 + gray_ratio * 45 + neutral_ratio * 20 - dark_ratio * 50 - abs(box_w - box_h) * 0.08
+            if (
+                score < CFG["pollutedComponentMinScore"]
+                or gray_ratio < CFG["pollutedComponentMinGrayRatio"]
+                or neutral_ratio < CFG["pollutedComponentMinNeutralRatio"]
+                or dark_ratio > CFG["pollutedComponentMaxDarkRatio"]
+            ):
+                rejected += 1
+                continue
+            candidates.append({
+                "x": box_x,
+                "y": box_y,
+                "w": box_w,
+                "h": box_h,
+                "centerX": center_x,
+                "centerY": center_y,
+                "score": score,
+                "fillRatio": fill_ratio,
+                "grayRatio": gray_ratio,
+                "neutralRatio": neutral_ratio,
+                "darkRatio": dark_ratio,
+            })
+    if not candidates:
+        return {"ok": False, "reason": f"polluted_component_candidates=0 rejected={rejected}"}
+    candidates = sorted(candidates, key=lambda b: (-b["score"], b["centerX"]))
+    return result_from_boxes(region, [candidates[0]], "polluted_component")
+
+
 def polluted_edge_score(img: Image.Image, region: dict[str, int], rel_x: int, y_start: int, y_end: int, step: int) -> float:
     rel_x = max(step * 2, min(region["w"] - step * 2, int(round(rel_x))))
     vals = []
@@ -306,6 +432,7 @@ def polluted_edges(img: Image.Image, profile: dict[str, Any]) -> dict[str, Any]:
     y_end = round(region["h"] * 0.9)
     min_center = region["x"] + region["w"] * CFG["pollutedFallbackMinCenterRatio"]
     candidates = []
+    rejected_confidence = 0
     edge_cache: dict[int, float] = {}
 
     def edge_at(rel_x: int) -> float:
@@ -345,6 +472,9 @@ def polluted_edges(img: Image.Image, profile: dict[str, Any]) -> dict[str, Any]:
             score = left_edge + right_edge + neutral_ratio * 20 - dark_ratio * 25
             if score < CFG["pollutedFallbackMinScore"]:
                 continue
+            if neutral_ratio < CFG["pollutedEdgeMinNeutralRatio"] or dark_ratio > CFG["pollutedEdgeMaxDarkRatio"]:
+                rejected_confidence += 1
+                continue
             candidates.append({
                 "x": region["x"] + x1,
                 "y": region["y"] + y_start,
@@ -357,7 +487,7 @@ def polluted_edges(img: Image.Image, profile: dict[str, Any]) -> dict[str, Any]:
                 "darkRatio": dark_ratio,
             })
     if not candidates:
-        return {"ok": False, "reason": "polluted_edge_candidates=0"}
+        return {"ok": False, "reason": f"polluted_edge_candidates=0 rejectedConfidence={rejected_confidence}"}
     preferred_max_center = region["x"] + region["w"] * 0.70
     preferred = [c for c in candidates if c["centerX"] <= preferred_max_center]
     pool = preferred or candidates
@@ -391,13 +521,24 @@ def analyze_image(path: Path, expected: dict[str, Any], profile: dict[str, Any])
         loc = fast
         if not fast["ok"] and type_probe["uiSliderOk"] and type_probe["imagePolluted"]:
             row["enteredPollutedFallback"] = True
-            loc = polluted_bright_columns(img, profile)
+            bright = polluted_bright_columns(img, profile)
             search_region = region_from(profile, "sliderProfile", "imageSearchRegion")
-            bright_too_far_right = bool(loc.get("ok") and loc.get("targetX") != "" and int(loc["targetX"]) > search_region["x"] + search_region["w"] * CFG["pollutedBrightMaxCenterRatio"])
-            if not loc["ok"] or bright_too_far_right:
-                edge_loc = polluted_edges(img, profile)
-                if edge_loc["ok"]:
-                    loc = edge_loc
+            bright_too_far_right = bool(bright.get("ok") and bright.get("targetX") != "" and int(bright["targetX"]) > search_region["x"] + search_region["w"] * CFG["pollutedBrightMaxCenterRatio"])
+            if bright["ok"] and not bright_too_far_right:
+                loc = bright
+            else:
+                component = polluted_components(img, profile)
+                if component["ok"]:
+                    loc = component
+                else:
+                    edge_loc = polluted_edges(img, profile)
+                    if edge_loc["ok"]:
+                        loc = edge_loc
+                    else:
+                        loc = {
+                            "ok": False,
+                            "reason": f"{bright.get('reason', 'bright_too_far_right')} {component.get('reason', '')} {edge_loc.get('reason', '')}",
+                        }
         row["targetX"] = loc.get("targetX", "")
         row["targetFallback"] = loc.get("fallback", "")
         row["targetReason"] = loc.get("reason", "")
