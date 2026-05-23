@@ -55,7 +55,7 @@ var CONFIG = {
             packageName: "", // 留空时使用当前 OpenAutoJS 包名；不要填 Mock App 或微信包名
             action: "org.openautojs.autojs.action.CAPTCHA_IME_SET_ANSWER", // OpenAutoJS 验证码输入法接收答案的广播 action
             extraAnswer: "answer", // 广播中携带验证码答案的 extra key
-            focusWaitMs: 150, // 点击验证码输入框后等待焦点/输入连接建立；偶发不输入可调到 400-600
+            focusWaitMs: 200, // 点击验证码输入框后等待焦点/输入连接建立；偶发不输入可调到 400-600
             afterBroadcastMs: 30, // 发送广播后给 receiver 一个极短处理窗口，一般无需调整
             commitWaitMs: 200, // 等待 IME commitText 完成；已验证 350ms 可完成，正式偶发不输入可调到 800-1200
         },

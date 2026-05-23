@@ -141,47 +141,15 @@ function createNanjingBookingCaptchaSolver(deps) {
     }
 
     function makePixelReader(img) {
-        var bitmap = null;
-        try {
-            if (img && typeof img.getBitmap === "function") {
-                bitmap = img.getBitmap();
-            }
-        } catch (ignoredBitmap) {}
-        if (bitmap && typeof bitmap.getPixel === "function") {
-            return function (x, y) {
-                return bitmap.getPixel(Math.round(x), Math.round(y));
-            };
-        }
         return function (x, y) {
             return imagePixel(img, Math.round(x), Math.round(y));
         };
     }
 
-    function colorNumber(color) {
-        if (typeof color === "number") return color;
-        try {
-            return Number(color);
-        } catch (ignored) {
-            return 0;
-        }
-    }
-
-    function colorRed(color) {
-        return (colorNumber(color) >> 16) & 0xff;
-    }
-
-    function colorGreen(color) {
-        return (colorNumber(color) >> 8) & 0xff;
-    }
-
-    function colorBlue(color) {
-        return colorNumber(color) & 0xff;
-    }
-
     function isWhiteCaptchaPixel(color) {
-        var r = colorRed(color);
-        var g = colorGreen(color);
-        var b = colorBlue(color);
+        var r = colors.red(color);
+        var g = colors.green(color);
+        var b = colors.blue(color);
         var min = Math.min(r, g, b);
         var max = Math.max(r, g, b);
         return min >= CONFIG.captcha.whiteThreshold && (max - min) <= 28;
@@ -1124,9 +1092,9 @@ function createNanjingBookingCaptchaSolver(deps) {
     }
 
     function isSliderGrayPixel(color) {
-        var r = colorRed(color);
-        var g = colorGreen(color);
-        var b = colorBlue(color);
+        var r = colors.red(color);
+        var g = colors.green(color);
+        var b = colors.blue(color);
         var min = Math.min(r, g, b);
         var max = Math.max(r, g, b);
         var cfg = CONFIG.captcha.slider;
@@ -1134,16 +1102,16 @@ function createNanjingBookingCaptchaSolver(deps) {
     }
 
     function isSliderTrackPixel(color) {
-        var r = colorRed(color);
-        var g = colorGreen(color);
-        var b = colorBlue(color);
+        var r = colors.red(color);
+        var g = colors.green(color);
+        var b = colors.blue(color);
         var min = Math.min(r, g, b);
         var max = Math.max(r, g, b);
         return min >= 205 && max <= 235 && (max - min) <= 12;
     }
 
     function isSliderArrowPixel(color) {
-        return colorRed(color) <= 55 && colorGreen(color) <= 55 && colorBlue(color) <= 60;
+        return colors.red(color) <= 55 && colors.green(color) <= 55 && colors.blue(color) <= 60;
     }
 
     function pixelRatioInRegion(img, region, step, predicate, pixelAt) {
