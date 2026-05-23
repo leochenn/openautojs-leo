@@ -1114,6 +1114,17 @@ function createNanjingBookingCaptchaSolver(deps) {
         return colors.red(color) <= 55 && colors.green(color) <= 55 && colors.blue(color) <= 60;
     }
 
+    function sliderBrightness(color) {
+        return (colors.red(color) + colors.green(color) + colors.blue(color)) / 3;
+    }
+
+    function sliderChroma(color) {
+        var r = colors.red(color);
+        var g = colors.green(color);
+        var b = colors.blue(color);
+        return Math.max(r, g, b) - Math.min(r, g, b);
+    }
+
     function pixelRatioInRegion(img, region, step, predicate, pixelAt) {
         var total = 0;
         var hits = 0;
@@ -1208,6 +1219,254 @@ function createNanjingBookingCaptchaSolver(deps) {
         };
     }
 
+    function buildSliderResult(region, boxes, source, extraDetail) {
+        if (!boxes || boxes.length < 1) {
+            return { ok: false, reason: "slider_boxes_empty", boxes: [] };
+        }
+        if (boxes.length === 1) {
+            var only = boxes[0];
+            var onlyDetail = "target=(" + Math.round(only.centerX) + "," + Math.round(only.centerY) + "," +
+                Math.round(only.w) + "x" + Math.round(only.h) + ")";
+            if (source) onlyDetail = "source=" + source + " " + onlyDetail;
+            if (extraDetail) onlyDetail += " " + extraDetail;
+            return {
+                ok: true,
+                region: region,
+                target: only,
+                boxes: [only],
+                fallback: source || "",
+                detail: onlyDetail
+            };
+        }
+        boxes.sort(function (a, b) { return b.w - a.w; });
+        var pair = boxes.slice(0, 2);
+        pair.sort(function (a, b) {
+            if (a.w !== b.w) return a.w - b.w;
+            return a.centerX - b.centerX;
+        });
+        var target = pair[0];
+        var detail = "small=(" + Math.round(target.centerX) + "," + Math.round(target.centerY) + "," +
+            Math.round(target.w) + "x" + Math.round(target.h) + ") large=(" +
+            Math.round(pair[1].centerX) + "," + Math.round(pair[1].centerY) + "," +
+            Math.round(pair[1].w) + "x" + Math.round(pair[1].h) + ")";
+        if (source) detail = "source=" + source + " " + detail;
+        if (extraDetail) detail += " " + extraDetail;
+        return {
+            ok: true,
+            region: region,
+            target: target,
+            boxes: pair,
+            fallback: source || "",
+            detail: detail
+        };
+    }
+
+    function shouldUsePollutedSliderFallback(typeProbe) {
+        return !!(typeProbe && typeProbe.uiSliderOk && typeProbe.imagePolluted);
+    }
+
+    function recognizeSliderByBrightColumns(img, region, pixelAt) {
+        var cfg = CONFIG.captcha.slider;
+        var step = cfg.pollutedFallbackStep || 8;
+        var yStart = Math.round(region.h * 0.34);
+        var yEnd = Math.round(region.h * 0.9);
+        var columnSamples = Math.max(1, Math.floor((yEnd - yStart) / step));
+        var strongColumnRatio = cfg.pollutedBrightColumnStrongRatio || 0.48;
+        var minColumnRatio = cfg.pollutedBrightColumnMinRatio || 0.28;
+        var preferredMaxCenterX = region.x + region.w * (cfg.pollutedBrightMaxCenterRatio || 0.72);
+        var minSide = scaleX((cfg.minSide || 90) * 0.85);
+        var maxSide = scaleX((cfg.maxSide || 215) * 1.10);
+        var minCenterX = region.x + region.w * (cfg.pollutedFallbackMinCenterRatio || 0.30);
+        var colCount = [];
+        var x;
+        var y;
+        for (x = 0; x <= region.w; x += step) {
+            colCount[Math.floor(x / step)] = 0;
+        }
+        for (y = yStart; y < yEnd; y += step) {
+            for (x = 0; x < region.w; x += step) {
+                var color = pixelAt(region.x + x, region.y + y);
+                var br = sliderBrightness(color);
+                var ch = sliderChroma(color);
+                if (br >= 205 && br <= 245 && ch <= 16) {
+                    colCount[Math.floor(x / step)]++;
+                }
+            }
+        }
+
+        var boxes = [];
+        var runDetails = [];
+        function appendBoxesForRatio(ratio) {
+            var minColumnHits = Math.max(8, Math.round(columnSamples * ratio));
+            var runs = [];
+            var inRun = false;
+            var startSlot = 0;
+            var quietSlots = 0;
+            for (var slot = 0; slot <= colCount.length; slot++) {
+                var active = slot < colCount.length && colCount[slot] >= minColumnHits;
+                if (active && !inRun) {
+                    inRun = true;
+                    startSlot = slot;
+                    quietSlots = 0;
+                } else if (!active && inRun) {
+                    quietSlots++;
+                    if (quietSlots > 2 || slot === colCount.length) {
+                        runs.push({ x1: startSlot * step, x2: Math.min(region.w - 1, (slot - quietSlots + 1) * step) });
+                        inRun = false;
+                        quietSlots = 0;
+                    }
+                } else if (active) {
+                    quietSlots = 0;
+                }
+            }
+            runDetails.push(ratio + ":" + runs.length + "/" + minColumnHits);
+            for (var i = 0; i < runs.length; i++) {
+                var run = runs[i];
+                var runW = run.x2 - run.x1 + 1;
+                var centerX = region.x + run.x1 + runW / 2;
+                if (runW < minSide || runW > maxSide || centerX < minCenterX) continue;
+                boxes.push({
+                    x: region.x + run.x1,
+                    y: region.y + yStart,
+                    w: runW,
+                    h: runW,
+                    area: runW * runW,
+                    centerX: centerX,
+                    centerY: region.y + yStart + runW / 2,
+                    columnRatio: ratio,
+                    minColumnHits: minColumnHits
+                });
+            }
+        }
+        appendBoxesForRatio(strongColumnRatio);
+        if (minColumnRatio !== strongColumnRatio) appendBoxesForRatio(minColumnRatio);
+        if (boxes.length < 1) {
+            return { ok: false, reason: "bright_columns_boxes=0 runs=" + runDetails.join(","), boxes: [] };
+        }
+        var preferred = [];
+        for (var bi = 0; bi < boxes.length; bi++) {
+            if (boxes[bi].centerX <= preferredMaxCenterX) preferred.push(boxes[bi]);
+        }
+        var pool = preferred.length ? preferred : boxes;
+        pool.sort(function (a, b) {
+            if (a.columnRatio !== b.columnRatio) return b.columnRatio - a.columnRatio;
+            return a.centerX - b.centerX;
+        });
+        var best = pool[0];
+        return buildSliderResult(region, [best], "polluted_bright_columns",
+            "runs=" + runDetails.join(",") + " step=" + step +
+            " minColumnHits=" + best.minColumnHits +
+            " columnRatio=" + best.columnRatio);
+    }
+
+    function pollutedEdgeScore(img, region, relX, yStart, yEnd, step, pixelAt) {
+        relX = Math.round(relX);
+        if (relX < step * 2) relX = step * 2;
+        if (relX > region.w - step * 2) relX = region.w - step * 2;
+        var total = 0;
+        var score = 0;
+        for (var y = yStart; y < yEnd; y += step) {
+            var left = sliderBrightness(pixelAt(region.x + relX - step, region.y + y));
+            var right = sliderBrightness(pixelAt(region.x + relX + step, region.y + y));
+            score += Math.abs(right - left);
+            total++;
+        }
+        return total ? score / total : 0;
+    }
+
+    function recognizeSliderByPollutedEdges(img, region, pixelAt) {
+        var cfg = CONFIG.captcha.slider;
+        var step = cfg.pollutedEdgeStep || Math.max(12, cfg.pollutedFallbackStep || 8);
+        var yStart = Math.round(region.h * 0.34);
+        var yEnd = Math.round(region.h * 0.9);
+        var minSide = scaleX((cfg.minSide || 90) * 0.85);
+        var maxSide = scaleX((cfg.maxSide || 215) * 0.90);
+        var minCenterX = region.x + region.w * (cfg.pollutedFallbackMinCenterRatio || 0.30);
+        var minScore = cfg.pollutedFallbackMinScore || 70;
+        var candidates = [];
+        var edgeCache = {};
+        function edgeAt(relX) {
+            var key = Math.round(relX / step) * step;
+            if (key < step * 2) key = step * 2;
+            if (key > region.w - step * 2) key = region.w - step * 2;
+            if (edgeCache[key] === undefined) {
+                edgeCache[key] = pollutedEdgeScore(img, region, key, yStart, yEnd, step, pixelAt);
+            }
+            return edgeCache[key];
+        }
+        for (var x1 = 0; x1 < region.w - minSide; x1 += step) {
+            for (var side = minSide; side <= maxSide; side += step) {
+                var x2 = x1 + side;
+                if (x2 >= region.w) continue;
+                var centerX = region.x + x1 + side / 2;
+                if (centerX < minCenterX) continue;
+                var leftEdge = edgeAt(x1);
+                var rightEdge = edgeAt(x2);
+                if (leftEdge <= 15 || rightEdge <= 15) continue;
+                var neutral = 0;
+                var dark = 0;
+                var total = 0;
+                var sampleBottom = Math.min(yStart + side, yEnd);
+                for (var xx = x1 + step; xx < x2 - step; xx += step * 2) {
+                    for (var yy = yStart + step; yy < sampleBottom - step; yy += step * 2) {
+                        var color = pixelAt(region.x + xx, region.y + yy);
+                        var br = sliderBrightness(color);
+                        var ch = sliderChroma(color);
+                        total++;
+                        if (br >= 150 && br <= 252 && ch <= 65) neutral++;
+                        if (br < 70) dark++;
+                    }
+                }
+                var neutralRatio = total ? neutral / total : 0;
+                var darkRatio = total ? dark / total : 1;
+                var score = leftEdge + rightEdge + neutralRatio * 20 - darkRatio * 25;
+                if (score < minScore) continue;
+                candidates.push({
+                    x: region.x + x1,
+                    y: region.y + yStart,
+                    w: side,
+                    h: side,
+                    area: side * side,
+                    centerX: centerX,
+                    centerY: region.y + yStart + side / 2,
+                    score: score,
+                    neutralRatio: neutralRatio,
+                    darkRatio: darkRatio
+                });
+            }
+        }
+        if (candidates.length < 1) {
+            return { ok: false, reason: "polluted_edge_candidates=0", boxes: [] };
+        }
+        var preferredMaxCenterX = region.x + region.w * 0.70;
+        var preferred = [];
+        for (var ci = 0; ci < candidates.length; ci++) {
+            if (candidates[ci].centerX <= preferredMaxCenterX) preferred.push(candidates[ci]);
+        }
+        var pool = preferred.length ? preferred : candidates;
+        pool.sort(function (a, b) {
+            if (a.score !== b.score) return b.score - a.score;
+            return a.centerX - b.centerX;
+        });
+        var best = pool[0];
+        return buildSliderResult(region, [best], "polluted_edge",
+            "score=" + best.score.toFixed(1) +
+            " neutral=" + best.neutralRatio.toFixed(2) +
+            " dark=" + best.darkRatio.toFixed(2) +
+            " candidates=" + candidates.length);
+    }
+
+    function recognizeSliderByPollutedFallback(img, region, pixelAt) {
+        var cfg = CONFIG.captcha.slider;
+        var bright = recognizeSliderByBrightColumns(img, region, pixelAt);
+        var brightMaxCenterX = region.x + region.w * (cfg.pollutedBrightMaxCenterRatio || 0.72);
+        if (bright.ok && bright.target && bright.target.centerX <= brightMaxCenterX) return bright;
+        var edge = recognizeSliderByPollutedEdges(img, region, pixelAt);
+        if (edge.ok) return edge;
+        if (bright.ok) return bright;
+        return { ok: false, reason: bright.reason + " " + edge.reason, boxes: [] };
+    }
+
     function detectSliderCaptchaByRegions(img, trackRegion, handleRegion, imageSearchRegion) {
         var cfg = CONFIG.captcha.slider;
         var start = Date.now();
@@ -1238,8 +1497,13 @@ function createNanjingBookingCaptchaSolver(deps) {
         var imageOk = !!(imageProbe && imageProbe.ok);
         var pairedWeakOk = trackPresenceOk && handlePresenceOk &&
             arrow.ratio >= (cfg.handleConfirmMinRatio || 0.065);
+        var uiSliderOk = trackPresenceOk && handlePresenceOk;
+        var imagePolluted = !!(imageProbe && imageProbe.ratio >= (cfg.pollutedImageMinRatio || 0.35) &&
+            imageProbe.boxes.length < 2);
+        var typeOk = uiSliderOk || arrowStrongOk || (imageOk && (handlePresenceOk || trackPresenceOk)) || pairedWeakOk;
         return {
-            ok: (trackOk && arrowOk) || arrowStrongOk || (imageOk && (handlePresenceOk || trackPresenceOk)) || pairedWeakOk,
+            ok: typeOk,
+            typeOk: typeOk,
             ratio: track.ratio,
             hits: track.hits,
             total: track.total,
@@ -1251,7 +1515,9 @@ function createNanjingBookingCaptchaSolver(deps) {
             arrowStrongOk: arrowStrongOk,
             trackPresenceOk: trackPresenceOk,
             handlePresenceOk: handlePresenceOk,
+            uiSliderOk: uiSliderOk,
             imageOk: imageOk,
+            imagePolluted: imagePolluted,
             imageRatio: imageProbe ? imageProbe.ratio : 0,
             imageHits: imageProbe ? imageProbe.hits : 0,
             imageTotal: imageProbe ? imageProbe.total : 0,
@@ -1286,19 +1552,20 @@ function createNanjingBookingCaptchaSolver(deps) {
         );
     }
 
-    function recognizeSliderCaptcha(img) {
+    function recognizeSliderCaptcha(img, typeProbe) {
         var cfg = CONFIG.captcha.slider;
         var sliderProfile = activeSliderProfile();
         if (sliderProfile) {
             return recognizeSliderCaptchaInRegion(
                 img,
-                normalizeProfileRegion(sliderProfile.imageSearchRegion, "profileSliderImageSearch", true)
+                normalizeProfileRegion(sliderProfile.imageSearchRegion, "profileSliderImageSearch", true),
+                typeProbe
             );
         }
-        return recognizeSliderCaptchaInRegion(img, scaledRegion(cfg.imageRegion));
+        return recognizeSliderCaptchaInRegion(img, scaledRegion(cfg.imageRegion), typeProbe);
     }
 
-    function recognizeSliderCaptchaInRegion(img, region) {
+    function recognizeSliderCaptchaInRegion(img, region, typeProbe) {
         var cfg = CONFIG.captcha.slider;
         var step = cfg.scanStep || 2;
         var pixelAt = makePixelReader(img);
@@ -1360,22 +1627,20 @@ function createNanjingBookingCaptchaSolver(deps) {
         }
 
         if (boxes.length < 2) {
-            return { ok: false, reason: "slider_gray_boxes=" + boxes.length + " runs=" + runs.length, boxes: boxes };
+            if (shouldUsePollutedSliderFallback(typeProbe)) {
+                var fallback = recognizeSliderByPollutedFallback(img, region, pixelAt);
+                if (fallback.ok) return fallback;
+                return {
+                    ok: false,
+                    reason: "slider_target_not_found gray_boxes=" + boxes.length +
+                        " runs=" + runs.length + " fallback=" + fallback.reason,
+                    region: region,
+                    boxes: boxes
+                };
+            }
+            return { ok: false, reason: "slider_gray_boxes=" + boxes.length + " runs=" + runs.length, region: region, boxes: boxes };
         }
-        boxes.sort(function (a, b) { return b.w - a.w; });
-        var pair = boxes.slice(0, 2);
-        pair.sort(function (a, b) { return a.w - b.w; });
-        var target = pair[0];
-        return {
-            ok: true,
-            region: region,
-            target: target,
-            boxes: pair,
-            detail: "small=(" + Math.round(target.centerX) + "," + Math.round(target.centerY) + "," +
-                Math.round(target.w) + "x" + Math.round(target.h) + ") large=(" +
-                Math.round(pair[1].centerX) + "," + Math.round(pair[1].centerY) + "," +
-                Math.round(pair[1].w) + "x" + Math.round(pair[1].h) + ")"
-        };
+        return buildSliderResult(region, boxes, "", "runs=" + runs.length);
     }
 
     function normalizeProfileRegion(region, name, templateEnabled) {
@@ -1411,7 +1676,7 @@ function createNanjingBookingCaptchaSolver(deps) {
         var handleRegion = normalizeProfileRegion(slider.handleRegion, "profileSliderHandle", true);
         var trackRegion = normalizeProfileRegion(slider.trackRegion, "profileSliderTrack", true);
         var trackProbe = detectSliderCaptchaByRegions(img, trackRegion, handleRegion, searchRegion);
-        var sliderResult = recognizeSliderCaptchaInRegion(img, searchRegion);
+        var sliderResult = recognizeSliderCaptchaInRegion(img, searchRegion, trackProbe);
         var start = centerOfRegion(handleRegion);
         var targetPoint = null;
         if (sliderResult && sliderResult.ok) {
@@ -1422,6 +1687,8 @@ function createNanjingBookingCaptchaSolver(deps) {
         }
         return {
             ok: !!(trackProbe.ok && sliderResult && sliderResult.ok),
+            typeOk: !!trackProbe.ok,
+            actualType: trackProbe.ok ? "slider" : "math",
             type: "slider",
             reason: trackProbe.ok
                 ? (sliderResult.ok ? "" : sliderResult.reason)
@@ -1497,10 +1764,13 @@ function createNanjingBookingCaptchaSolver(deps) {
                 " arrowStrongOk=" + trackProbe.arrowStrongOk +
                 " trackPresenceOk=" + trackProbe.trackPresenceOk +
                 " handlePresenceOk=" + trackProbe.handlePresenceOk +
+                " uiSliderOk=" + trackProbe.uiSliderOk +
                 " imageOk=" + trackProbe.imageOk +
+                " imagePolluted=" + trackProbe.imagePolluted +
                 " imageRatio=" + trackProbe.imageRatio.toFixed(3) +
                 " imageBoxes=" + trackProbe.imageBoxes +
                 " pairedWeakOk=" + trackProbe.pairedWeakOk +
+                " typeOk=" + trackProbe.typeOk +
                 " step=" + trackProbe.step +
                 " imageStep=" + trackProbe.imageStep +
                 " cost=" + trackProbe.cost + "ms" +
@@ -1509,7 +1779,7 @@ function createNanjingBookingCaptchaSolver(deps) {
                 " imageCost=" + trackProbe.imageCost + "ms" +
                 " ok=" + trackProbe.ok);
             if (trackProbe.ok) {
-                var sliderResult = recognizeSliderCaptcha(img);
+                var sliderResult = recognizeSliderCaptcha(img, trackProbe);
                 if (sliderResult.ok) {
                     recognizeCost = Date.now() - recognizeStart;
                     stats.recognize = recognizeCost;
@@ -1538,7 +1808,25 @@ function createNanjingBookingCaptchaSolver(deps) {
                         stats: stats
                     };
                 }
-                logx("滑块轨道已命中但灰块识别失败，进入数学题 OCR reason=" + sliderResult.reason);
+                recognizeCost = Date.now() - recognizeStart;
+                stats.recognize = recognizeCost;
+                stats.captchaType = "slider";
+                stats.outcome = "fail";
+                stats.raw = "slider";
+                stats.expression = "slider";
+                stats.reason = "slider_target_not_found: " + sliderResult.reason;
+                failureRegion = sliderResult.region || failureRegion;
+                saveCaptchaFailure(img, failureRegion, stats.reason);
+                logx("滑块验证码类型已命中，但目标定位失败，保留页面给人工兜底 reason=" + sliderResult.reason);
+                logx("验证码耗时汇总 " + captchaStatsText(stats, Date.now() - allStart));
+                return {
+                    ok: false,
+                    manualFallback: true,
+                    type: "slider",
+                    reason: stats.reason,
+                    detail: sliderResult.detail || "",
+                    stats: stats
+                };
             } else {
                 logx("未识别为滑块验证码，进入数学题 OCR");
             }

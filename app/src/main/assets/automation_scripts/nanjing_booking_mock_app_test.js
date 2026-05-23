@@ -69,6 +69,16 @@ var CONFIG = {
             handlePresenceMinHits: 4,
             handleConfirmMinRatio: 0.065,
             imageProbeMinRatio: 0.004,
+            pollutedImageMinRatio: 0.35,
+            pollutedFallbackStep: 8,
+            pollutedBrightColumnStrongRatio: 0.48,
+            pollutedBrightColumnMinRatio: 0.28,
+            pollutedBrightMaxCenterRatio: 0.72,
+            pollutedEdgeStep: 12,
+            pollutedFallbackMinScore: 70,
+            pollutedFallbackMinNeutralRatio: 0.68,
+            pollutedFallbackMaxDarkRatio: 0.22,
+            pollutedFallbackMinCenterRatio: 0.25,
             fastImageMinColumnHits: 3,
             grayMin: 165,
             grayMax: 245,
@@ -1643,8 +1653,13 @@ function detectSliderCaptchaByRegions(img, trackRegion, handleRegion, imageSearc
     var imageOk = !!(imageProbe && imageProbe.ok);
     var pairedWeakOk = trackPresenceOk && handlePresenceOk &&
         arrow.ratio >= (cfg.handleConfirmMinRatio || 0.065);
+    var uiSliderOk = trackPresenceOk && handlePresenceOk;
+    var imagePolluted = !!(imageProbe && imageProbe.ratio >= (cfg.pollutedImageMinRatio || 0.35) &&
+        imageProbe.boxes.length < 2);
+    var typeOk = uiSliderOk || arrowStrongOk || (imageOk && (handlePresenceOk || trackPresenceOk)) || pairedWeakOk;
     return {
-        ok: (trackOk && arrowOk) || arrowStrongOk || (imageOk && (handlePresenceOk || trackPresenceOk)) || pairedWeakOk,
+        ok: typeOk,
+        typeOk: typeOk,
         ratio: track.ratio,
         hits: track.hits,
         total: track.total,
@@ -1656,7 +1671,9 @@ function detectSliderCaptchaByRegions(img, trackRegion, handleRegion, imageSearc
         arrowStrongOk: arrowStrongOk,
         trackPresenceOk: trackPresenceOk,
         handlePresenceOk: handlePresenceOk,
+        uiSliderOk: uiSliderOk,
         imageOk: imageOk,
+        imagePolluted: imagePolluted,
         imageRatio: imageProbe ? imageProbe.ratio : 0,
         imageHits: imageProbe ? imageProbe.hits : 0,
         imageTotal: imageProbe ? imageProbe.total : 0,
@@ -1838,10 +1855,13 @@ function solveCaptchaAfterConfirm() {
             " arrowStrongOk=" + trackProbe.arrowStrongOk +
             " trackPresenceOk=" + trackProbe.trackPresenceOk +
             " handlePresenceOk=" + trackProbe.handlePresenceOk +
+            " uiSliderOk=" + trackProbe.uiSliderOk +
             " imageOk=" + trackProbe.imageOk +
+            " imagePolluted=" + trackProbe.imagePolluted +
             " imageRatio=" + trackProbe.imageRatio.toFixed(3) +
             " imageBoxes=" + trackProbe.imageBoxes +
             " pairedWeakOk=" + trackProbe.pairedWeakOk +
+            " typeOk=" + trackProbe.typeOk +
             " step=" + trackProbe.step +
             " imageStep=" + trackProbe.imageStep +
             " cost=" + trackProbe.cost + "ms" +
@@ -1873,7 +1893,18 @@ function solveCaptchaAfterConfirm() {
                 logx("验证码耗时汇总 " + captchaStatsText(stats, Date.now() - allStart));
                 return;
             }
-            logx("滑块轨道已命中但灰块识别失败，进入数学题 OCR reason=" + sliderResult.reason);
+            recognizeCost = Date.now() - recognizeStart;
+            stats.recognize = recognizeCost;
+            stats.captchaType = "slider";
+            stats.outcome = "fail";
+            stats.raw = "slider";
+            stats.expression = "slider";
+            stats.reason = "slider_target_not_found: " + sliderResult.reason;
+            failureRegion = sliderResult.region || failureRegion;
+            saveCaptchaFailure(img, failureRegion, stats.reason);
+            logx("滑块验证码类型已命中，但目标定位失败，保留页面给人工兜底 reason=" + sliderResult.reason);
+            logx("验证码耗时汇总 " + captchaStatsText(stats, Date.now() - allStart));
+            return;
         } else {
             logx("未识别为滑块验证码，进入数学题 OCR");
         }
