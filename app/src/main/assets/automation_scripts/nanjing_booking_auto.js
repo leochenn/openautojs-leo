@@ -40,6 +40,7 @@ var CONFIG = {
     captcha: {
         enabled: true,
         moduleFileName: "nanjing_booking_captcha_solver.js",
+        preloadMinLeadMs: 3000,
         expressionRegion: { x: 455, y: 1160, w: 570, h: 200 },
         expressionRegions: [
             { name: "mockLargeText", x: 455, y: 1160, w: 570, h: 200, templateEnabled: true },
@@ -570,6 +571,39 @@ function loadCaptchaSolver() {
     } catch (e) {
         logx("CAPTCHA", "验证码模块加载失败 path=" + modulePath + " err=" + e + " stack=" + (e && e.stack ? e.stack : ""));
         return null;
+    }
+}
+
+function preloadCaptchaSolverForRush(reason, leadMs) {
+    if (!CONFIG.captcha || !CONFIG.captcha.enabled) {
+        return { ok: true, skipped: true, reason: "captcha_disabled" };
+    }
+    if (runtime.captchaSolver) {
+        return { ok: true, cached: true };
+    }
+    var minLeadMs = CONFIG.captcha.preloadMinLeadMs || 3000;
+    if (typeof leadMs === "number" && leadMs >= 0 && leadMs < minLeadMs) {
+        logx("CAPTCHA", "验证码模块预加载跳过 reason=" + reason + " lead=" + leadMs + "ms minLead=" + minLeadMs + "ms");
+        return { ok: true, skipped: true, reason: "lead_too_short" };
+    }
+    var start = Date.now();
+    try {
+        var profileResult = applyCaptchaProfileToConfig();
+        if (!profileResult.ok) {
+            logx("CAPTCHA", "验证码模块预加载跳过 reason=" + reason + " profile=" + profileResult.reason);
+            return { ok: false, skipped: true, reason: profileResult.reason };
+        }
+        var solver = loadCaptchaSolver();
+        var cost = Date.now() - start;
+        if (solver) {
+            logx("CAPTCHA", "验证码模块预加载完成 reason=" + reason + " lead=" + leadMs + "ms cost=" + cost + "ms");
+            return { ok: true, cost: cost };
+        }
+        logx("CAPTCHA", "验证码模块预加载未完成 reason=" + reason + " lead=" + leadMs + "ms cost=" + cost + "ms");
+        return { ok: false, skipped: true, reason: "captcha_module_unavailable" };
+    } catch (e) {
+        logx("CAPTCHA", "验证码模块预加载异常 reason=" + reason + " err=" + e);
+        return { ok: false, skipped: true, reason: "exception" };
     }
 }
 
@@ -1699,9 +1733,13 @@ function waitUntilStartTime() {
         preRushLoginProbe();
         STAGE = "WAIT";
         diff = target.getTime() - Date.now();
+        preloadCaptchaSolverForRush("after_login_probe", diff);
+        diff = target.getTime() - Date.now();
         logRushPlan("登录探测完成，进入最终等待");
     } else {
         logx("TIME", "距离抢票不足或等于登录探测提前量，跳过登录探测 diff=" + diff + "ms lead=" + CONFIG.preRushLoginProbeLeadMs + "ms");
+        preloadCaptchaSolverForRush("wait_without_login_probe", diff);
+        diff = target.getTime() - Date.now();
     }
 
     while (diff > 15000) {
