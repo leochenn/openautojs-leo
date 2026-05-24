@@ -48,6 +48,7 @@ var CONFIG = {
             { name: "wechatImageStrip", x: 295, y: 860, w: 850, h: 150, templateEnabled: false }
         ],
         emptyOcrRetryWaitMs: 700,
+        prefocusInputBeforeMathOcr: true,
         inputPoint: { x: 720, y: 1908 },
         // 自定义数字输入法通道：抢票前需要启用并切换到 OpenAutoJS 内置的验证码数字输入法。
         // 流程：点击验证码输入框 -> 等待 focusWaitMs -> 广播答案给 IME -> 等待 commitWaitMs -> 收起键盘 -> 点击确定。
@@ -58,7 +59,7 @@ var CONFIG = {
             extraAnswer: "answer", // 广播中携带验证码答案的 extra key
             focusWaitMs: 200, // 点击验证码输入框后等待焦点/输入连接建立；偶发不输入可调到 400-600
             afterBroadcastMs: 30, // 发送广播后给 receiver 一个极短处理窗口，一般无需调整
-            commitWaitMs: 200, // 等待 IME commitText 完成；已验证 350ms 可完成，正式偶发不输入可调到 800-1200
+            commitWaitMs: 50, // 等待 IME commitText 完成；已验证 350ms 可完成，正式偶发不输入可调到 800-1200
         },
         submitPoint: { x: 720, y: 2216 },
         autoSubmitAfterInput: true,

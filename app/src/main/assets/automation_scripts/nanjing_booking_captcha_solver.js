@@ -98,6 +98,7 @@ function createNanjingBookingCaptchaSolver(deps) {
             templateBuild: -1,
             glyphScan: -1,
             templateClassify: -1,
+            prefocus: -1,
             input: 0,
             saveFailure: -1,
             raw: "",
@@ -122,6 +123,7 @@ function createNanjingBookingCaptchaSolver(deps) {
             " templateBuild=" + stats.templateBuild + "ms" +
             " glyphScan=" + stats.glyphScan + "ms" +
             " templateClassify=" + stats.templateClassify + "ms" +
+            " prefocus=" + stats.prefocus + "ms" +
             " input=" + stats.input + "ms" +
             " saveFailure=" + stats.saveFailure + "ms" +
             " total=" + total + "ms" +
@@ -1063,32 +1065,86 @@ function createNanjingBookingCaptchaSolver(deps) {
         return { ok: true, submitted: true, detail: detail };
     }
 
-    function inputCaptchaAnswer(answer) {
+    function mathInputPoint() {
         var mathProfile = activeMathProfile();
-        var inputPoint = mathProfile
+        return mathProfile
             ? pointFromRegionCenter("captchaInput", mathProfile.inputRegion)
             : basePoint("captchaInput", CONFIG.captcha.inputPoint.x, CONFIG.captcha.inputPoint.y);
-        var submitPoint = mathProfile
+    }
+
+    function mathSubmitPoint() {
+        var mathProfile = activeMathProfile();
+        return mathProfile
             ? pointFromRegionCenter("captchaSubmit", mathProfile.submitRegion)
             : basePoint("captchaSubmit", CONFIG.captcha.submitPoint.x, CONFIG.captcha.submitPoint.y);
+    }
+
+    function clearMathCaptchaInputPrefocus() {
+        runtime.captchaMathInputPrefocused = false;
+        runtime.captchaMathInputFocusedAt = 0;
+    }
+
+    function isMathInputPrefocusEnabled() {
         var imeCfg = CONFIG.captcha.inputMethod || {};
-        deps.pressPoint("验证码输入框", inputPoint);
-        if (imeCfg.focusWaitMs > 0) {
-            sleep(imeCfg.focusWaitMs);
+        return CONFIG.captcha.prefocusInputBeforeMathOcr === true && imeCfg.enabled === true;
+    }
+
+    function prefocusMathCaptchaInput(reason) {
+        if (!isMathInputPrefocusEnabled()) return false;
+        var start = Date.now();
+        try {
+            var inputPoint = mathInputPoint();
+            deps.pressPoint("验证码输入框预聚焦", inputPoint);
+            runtime.captchaMathInputPrefocused = true;
+            runtime.captchaMathInputFocusedAt = Date.now();
+            var cost = runtime.captchaMathInputFocusedAt - start;
+            if (runtime.captchaStats) {
+                runtime.captchaStats.prefocus = cost;
+            }
+            logx("数学验证码输入框已预聚焦 reason=" + reason +
+                " x=" + inputPoint.x + " y=" + inputPoint.y + " cost=" + cost + "ms");
+            return true;
+        } catch (e) {
+            clearMathCaptchaInputPrefocus();
+            logx("数学验证码输入框预聚焦失败 reason=" + reason + " err=" + e);
+            return false;
+        }
+    }
+
+    function inputCaptchaAnswer(answer) {
+        var submitPoint = mathSubmitPoint();
+        var imeCfg = CONFIG.captcha.inputMethod || {};
+        if (runtime.captchaMathInputPrefocused === true) {
+            var elapsed = Date.now() - (runtime.captchaMathInputFocusedAt || 0);
+            var remain = Math.max(0, (imeCfg.focusWaitMs || 0) - elapsed);
+            logx("复用数学验证码输入框预聚焦 elapsed=" + elapsed + "ms remain=" + remain + "ms");
+            if (remain > 0) {
+                sleep(remain);
+            }
+        } else {
+            var inputPoint = mathInputPoint();
+            deps.pressPoint("验证码输入框", inputPoint);
+            if (imeCfg.focusWaitMs > 0) {
+                sleep(imeCfg.focusWaitMs);
+            }
         }
         if (!imeCfg.enabled) {
+            clearMathCaptchaInputPrefocus();
             return { ok: false, manualFallback: true, reason: "captcha_ime_disabled" };
         }
         var imeResult = sendCaptchaAnswerToInputMethod(answer);
         sleep(imeCfg.commitWaitMs || CONFIG.captcha.afterInputMs);
         if (!imeResult.ok) {
+            clearMathCaptchaInputPrefocus();
             return {
                 ok: false,
                 manualFallback: true,
                 reason: imeResult.reason || "captcha_ime_unavailable"
             };
         }
-        return finishCaptchaInput(answer, submitPoint, "captcha_ime");
+        var result = finishCaptchaInput(answer, submitPoint, "captcha_ime");
+        clearMathCaptchaInputPrefocus();
+        return result;
     }
 
     function isSliderGrayPixel(color) {
@@ -1892,6 +1948,7 @@ function createNanjingBookingCaptchaSolver(deps) {
         var allStart = Date.now();
         var stats = newCaptchaStats();
         runtime.captchaStats = stats;
+        clearMathCaptchaInputPrefocus();
         logx("验证码阶段开始，等待弹窗渲染 " + CONFIG.afterConfirmCaptchaWaitMs + "ms");
         sleep(CONFIG.afterConfirmCaptchaWaitMs);
         var waitCost = Date.now() - allStart;
@@ -1989,6 +2046,7 @@ function createNanjingBookingCaptchaSolver(deps) {
                 };
             } else {
                 logx("未识别为滑块验证码，进入数学题 OCR");
+                prefocusMathCaptchaInput("before_math_ocr");
             }
 
             var result = recognizeCaptchaAcrossRegions(img, regions);
@@ -2084,6 +2142,7 @@ function createNanjingBookingCaptchaSolver(deps) {
                 stats: stats
             };
         } finally {
+            clearMathCaptchaInputPrefocus();
             runtime.captchaStats = null;
             if (img) {
                 try { img.recycle(); } catch (ignoredRecycle) {}

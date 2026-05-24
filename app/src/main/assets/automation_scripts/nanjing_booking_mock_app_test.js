@@ -28,6 +28,7 @@ var CONFIG = {
     afterConfirmCaptchaWaitMs: 500,
     captcha: {
         expressionRegion: { x: 455, y: 1160, w: 570, h: 200 },
+        prefocusInputBeforeMathOcr: true,
         inputPoint: { x: 720, y: 1908 },
         // 与正式脚本第二轮验证码输入法参数保持一致。
         inputMethod: {
@@ -110,7 +111,9 @@ var runtime = {
     latestLogPath: CONFIG.latestLogPath,
     captchaTemplates: null,
     captchaStats: null,
-    captchaProfile: null
+    captchaProfile: null,
+    captchaMathInputPrefocused: false,
+    captchaMathInputFocusedAt: 0
 };
 
 function fileTimeText() {
@@ -436,6 +439,7 @@ function newCaptchaStats() {
         templateBuild: -1,
         glyphScan: -1,
         templateClassify: -1,
+        prefocus: -1,
         input: 0,
         saveFailure: -1,
         raw: "",
@@ -460,6 +464,7 @@ function captchaStatsText(stats, total) {
         " templateBuild=" + stats.templateBuild + "ms" +
         " glyphScan=" + stats.glyphScan + "ms" +
         " templateClassify=" + stats.templateClassify + "ms" +
+        " prefocus=" + stats.prefocus + "ms" +
         " input=" + stats.input + "ms" +
         " saveFailure=" + stats.saveFailure + "ms" +
         " total=" + total + "ms" +
@@ -1489,32 +1494,86 @@ function finishCaptchaInput(answer, submitPoint, detail) {
     return { ok: true, submitted: true, detail: detail };
 }
 
-function inputCaptchaAnswer(answer) {
+function mathInputPoint() {
     var math = activeMathProfile();
-    var inputPoint = math
+    return math
         ? pointFromRegionCenter("mathInput", math.inputRegion)
         : basePoint("captchaInput", CONFIG.captcha.inputPoint.x, CONFIG.captcha.inputPoint.y);
-    var submitPoint = math
+}
+
+function mathSubmitPoint() {
+    var math = activeMathProfile();
+    return math
         ? pointFromRegionCenter("mathSubmit", math.submitRegion)
         : basePoint("captchaSubmit", CONFIG.captcha.submitPoint.x, CONFIG.captcha.submitPoint.y);
+}
+
+function clearMathCaptchaInputPrefocus() {
+    runtime.captchaMathInputPrefocused = false;
+    runtime.captchaMathInputFocusedAt = 0;
+}
+
+function isMathInputPrefocusEnabled() {
     var imeCfg = CONFIG.captcha.inputMethod || {};
-    pressPoint("验证码输入框", inputPoint);
-    if (imeCfg.focusWaitMs > 0) {
-        sleep(imeCfg.focusWaitMs);
+    return CONFIG.captcha.prefocusInputBeforeMathOcr === true && imeCfg.enabled === true;
+}
+
+function prefocusMathCaptchaInput(reason) {
+    if (!isMathInputPrefocusEnabled()) return false;
+    var start = Date.now();
+    try {
+        var inputPoint = mathInputPoint();
+        pressPoint("验证码输入框预聚焦", inputPoint);
+        runtime.captchaMathInputPrefocused = true;
+        runtime.captchaMathInputFocusedAt = Date.now();
+        var cost = runtime.captchaMathInputFocusedAt - start;
+        if (runtime.captchaStats) {
+            runtime.captchaStats.prefocus = cost;
+        }
+        logx("数学验证码输入框已预聚焦 reason=" + reason +
+            " x=" + inputPoint.x + " y=" + inputPoint.y + " cost=" + cost + "ms");
+        return true;
+    } catch (e) {
+        clearMathCaptchaInputPrefocus();
+        logx("数学验证码输入框预聚焦失败 reason=" + reason + " err=" + e);
+        return false;
+    }
+}
+
+function inputCaptchaAnswer(answer) {
+    var submitPoint = mathSubmitPoint();
+    var imeCfg = CONFIG.captcha.inputMethod || {};
+    if (runtime.captchaMathInputPrefocused === true) {
+        var elapsed = Date.now() - (runtime.captchaMathInputFocusedAt || 0);
+        var remain = Math.max(0, (imeCfg.focusWaitMs || 0) - elapsed);
+        logx("复用数学验证码输入框预聚焦 elapsed=" + elapsed + "ms remain=" + remain + "ms");
+        if (remain > 0) {
+            sleep(remain);
+        }
+    } else {
+        var inputPoint = mathInputPoint();
+        pressPoint("验证码输入框", inputPoint);
+        if (imeCfg.focusWaitMs > 0) {
+            sleep(imeCfg.focusWaitMs);
+        }
     }
     if (!imeCfg.enabled) {
+        clearMathCaptchaInputPrefocus();
         return { ok: false, manualFallback: true, reason: "captcha_ime_disabled" };
     }
     var imeResult = sendCaptchaAnswerToInputMethod(answer);
     sleep(imeCfg.commitWaitMs || CONFIG.captcha.afterInputMs);
     if (!imeResult.ok) {
+        clearMathCaptchaInputPrefocus();
         return {
             ok: false,
             manualFallback: true,
             reason: imeResult.reason || "captcha_ime_unavailable"
         };
     }
-    return finishCaptchaInput(answer, submitPoint, "captcha_ime");
+    var result = finishCaptchaInput(answer, submitPoint, "captcha_ime");
+    clearMathCaptchaInputPrefocus();
+    return result;
 }
 
 function isSliderGrayPixel(color) {
@@ -1834,6 +1893,7 @@ function solveCaptchaAfterConfirm() {
     var allStart = Date.now();
     var stats = newCaptchaStats();
     runtime.captchaStats = stats;
+    clearMathCaptchaInputPrefocus();
     logx("验证码阶段开始，等待弹窗渲染 " + CONFIG.afterConfirmCaptchaWaitMs + "ms");
     sleep(CONFIG.afterConfirmCaptchaWaitMs);
     var waitCost = Date.now() - allStart;
@@ -1918,6 +1978,7 @@ function solveCaptchaAfterConfirm() {
             return;
         } else {
             logx("未识别为滑块验证码，进入数学题 OCR");
+            prefocusMathCaptchaInput("before_math_ocr");
         }
 
         var result = recognizeCaptchaExpression(img, region);
@@ -1967,6 +2028,7 @@ function solveCaptchaAfterConfirm() {
         logx("验证码耗时汇总 " + captchaStatsText(stats, Date.now() - allStart));
         throw e;
     } finally {
+        clearMathCaptchaInputPrefocus();
         runtime.captchaStats = null;
         if (img) {
             try { img.recycle(); } catch (ignoredRecycle) {}

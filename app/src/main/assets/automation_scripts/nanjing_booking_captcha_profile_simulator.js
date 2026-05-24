@@ -16,6 +16,7 @@ var CONFIG = {
         whiteThreshold: 245,
         templateGrid: { w: 24, h: 32 },
         minGlyphScore: 0.22,
+        prefocusInputBeforeMathOcr: false,
         inputMethod: { enabled: false },
         slider: {
             dragDuration: 420,
