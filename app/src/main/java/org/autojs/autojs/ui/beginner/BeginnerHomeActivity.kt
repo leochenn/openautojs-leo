@@ -10,6 +10,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -160,7 +161,18 @@ private fun BeginnerHomeScreen(
     )
     val configError = AutomationScripts.validateConfig(config)
 
+    // 计算准备状态
+    val imeReady = imeEnabled && imeSelected
+    val allReady = storageReady && accessibilityReady && imeReady && captchaReady
+    val pendingCount = listOf(
+        !storageReady,
+        !accessibilityReady,
+        !imeReady,
+        !captchaReady
+    ).count { it }
+
     var showSettingsDialog by rememberSaveable { mutableStateOf(false) }
+    var isSetupExpanded by rememberSaveable { mutableStateOf(false) }
 
     Scaffold(
         containerColor = Color.White,
@@ -181,6 +193,51 @@ private fun BeginnerHomeScreen(
                     }
                 }
             )
+        },
+        bottomBar = {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = Color.White,
+                shadowElevation = 8.dp
+            ) {
+                Button(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    shape = ButtonShape,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AppPrimary,
+                        contentColor = Color.White
+                    ),
+                    enabled = allReady,
+                    onClick = {
+                        runBookingScript(
+                            context = context,
+                            config = config,
+                            storageReady = storageReady,
+                            accessibilityReady = accessibilityReady,
+                            imeReady = imeReady,
+                            requestStoragePermission = {
+                                storagePermissions.launchMultiplePermissionRequest()
+                            },
+                            openAccessibilitySettings = {
+                                context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                            },
+                            openInputMethodGuide = {
+                                context.startActivity(Intent(context, InputMethodGuideActivity::class.java))
+                            }
+                        )
+                    }
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_run),
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(text = "运行脚本")
+                }
+            }
         }
     ) { padding ->
         Column(
@@ -191,32 +248,7 @@ private fun BeginnerHomeScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text(
-                text = "基础准备",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold
-            )
-            SetupCard(
-                storageReady = storageReady,
-                accessibilityReady = accessibilityReady,
-                imeEnabled = imeEnabled,
-                imeSelected = imeSelected,
-                requestStoragePermission = {
-                    storagePermissions.launchMultiplePermissionRequest()
-                },
-                openAccessibilitySettings = {
-                    context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                },
-                openInputMethodGuide = {
-                    context.startActivity(Intent(context, InputMethodGuideActivity::class.java))
-                },
-                captchaReady = captchaReady,
-                captchaDescription = captchaDescription,
-                openCaptchaCalibration = {
-                    context.startActivity(Intent(context, CaptchaCalibrationActivity::class.java))
-                }
-            )
-
+            // 修改脚本配置
             Text(
                 text = "修改脚本配置",
                 style = MaterialTheme.typography.titleLarge,
@@ -238,60 +270,118 @@ private fun BeginnerHomeScreen(
                 error = configError
             )
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                OutlinedButton(
-                    modifier = Modifier.weight(1f),
-                    shape = ButtonShape,
-                    border = BorderStroke(1.dp, AppPrimary.copy(alpha = 0.55f)),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = AppPrimary),
-                    onClick = {
-                        saveConfigOrToast(context, config)
+            // 基础准备 - 可折叠
+            if (!allReady) {
+                // 有未完成项时展开显示
+                Text(
+                    text = "⚠️ 请先完成基础准备（${pendingCount}项未完成）",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = AppError
+                )
+                SetupCard(
+                    storageReady = storageReady,
+                    accessibilityReady = accessibilityReady,
+                    imeEnabled = imeEnabled,
+                    imeSelected = imeSelected,
+                    requestStoragePermission = {
+                        storagePermissions.launchMultiplePermissionRequest()
+                    },
+                    openAccessibilitySettings = {
+                        context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                    },
+                    openInputMethodGuide = {
+                        context.startActivity(Intent(context, InputMethodGuideActivity::class.java))
+                    },
+                    captchaReady = captchaReady,
+                    captchaDescription = captchaDescription,
+                    openCaptchaCalibration = {
+                        context.startActivity(Intent(context, CaptchaCalibrationActivity::class.java))
                     }
+                )
+            } else {
+                // 全部完成后折叠显示
+                OutlinedCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = CardShape,
+                    border = BorderStroke(1.dp, AppDivider),
+                    colors = CardDefaults.outlinedCardColors(containerColor = Color.White)
                 ) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.ic_save),
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(text = "保存配置")
-                }
-                Button(
-                    modifier = Modifier.weight(1f),
-                    shape = ButtonShape,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = AppPrimary,
-                        contentColor = Color.White
-                    ),
-                    onClick = {
-                        runBookingScript(
-                            context = context,
-                            config = config,
-                            storageReady = storageReady,
-                            accessibilityReady = accessibilityReady,
-                            imeReady = imeEnabled && imeSelected,
-                            requestStoragePermission = {
-                                storagePermissions.launchMultiplePermissionRequest()
-                            },
-                            openAccessibilitySettings = {
-                                context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                            },
-                            openInputMethodGuide = {
-                                context.startActivity(Intent(context, InputMethodGuideActivity::class.java))
+                    Column {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { isSetupExpanded = !isSetupExpanded }
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_save),
+                                contentDescription = null,
+                                tint = AppPrimary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                text = "基础准备就绪",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Medium,
+                                color = AppPrimary,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                text = if (isSetupExpanded) "收起" else "查看",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = AppPrimary
+                            )
+                        }
+
+                        // 展开时显示详情
+                        if (isSetupExpanded) {
+                            Divider(modifier = Modifier.padding(horizontal = 16.dp))
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                SetupStatusRow(
+                                    title = "存储权限",
+                                    description = "已允许脚本读写日志和缓存",
+                                    ready = storageReady,
+                                    actionText = if (storageReady) "重新申请" else "去开启",
+                                    onAction = {
+                                        storagePermissions.launchMultiplePermissionRequest()
+                                    }
+                                )
+                                Divider(modifier = Modifier.padding(vertical = 8.dp))
+                                SetupStatusRow(
+                                    title = "无障碍服务",
+                                    description = if (accessibilityReady) "已允许自动点击和滑动" else "脚本运行前必须开启",
+                                    ready = accessibilityReady,
+                                    actionText = if (accessibilityReady) "查看设置" else "去开启",
+                                    onAction = {
+                                        context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                                    }
+                                )
+                                Divider(modifier = Modifier.padding(vertical = 8.dp))
+                                SetupStatusRow(
+                                    title = "数字输入法",
+                                    description = if (imeReady) "已启用并设为当前输入法" else "用于验证码输入框自动填入数字结果",
+                                    ready = imeReady,
+                                    actionText = if (imeReady) "查看设置" else "去设置",
+                                    onAction = {
+                                        context.startActivity(Intent(context, InputMethodGuideActivity::class.java))
+                                    }
+                                )
+                                Divider(modifier = Modifier.padding(vertical = 8.dp))
+                                SetupStatusRow(
+                                    title = "验证码校准",
+                                    description = captchaDescription,
+                                    ready = captchaReady,
+                                    actionText = if (captchaReady) "查看" else "去校准",
+                                    onAction = {
+                                        context.startActivity(Intent(context, CaptchaCalibrationActivity::class.java))
+                                    }
+                                )
                             }
-                        )
+                        }
                     }
-                ) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.ic_run),
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(text = "运行脚本")
                 }
             }
         }
