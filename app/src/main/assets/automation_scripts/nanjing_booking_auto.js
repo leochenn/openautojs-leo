@@ -176,7 +176,9 @@ var runtime = {
     freshVisitorPoints: false,
     captchaTemplates: null,
     captchaStats: null,
-    captchaSolver: null
+    captchaSolver: null,
+    logBuffer: [],
+    useBufferedLog: false
 };
 
 // ==================== 日志模块 ====================
@@ -193,6 +195,14 @@ function nowText() {
 }
 
 function writeLogLine(line) {
+    if (runtime.useBufferedLog) {
+        runtime.logBuffer.push(line);
+        return;
+    }
+    writeLogLineToFile(line);
+}
+
+function writeLogLineToFile(line) {
     try {
         files.append(runtime.logPath, line + "\n");
         if (runtime.latestLogPath && runtime.latestLogPath !== runtime.logPath) {
@@ -205,6 +215,32 @@ function writeLogLine(line) {
                 files.append(runtime.logPath, line + "\n");
             } catch (ignored) {}
         }
+    }
+}
+
+function flushLogBuffer() {
+    if (runtime.logBuffer.length === 0) return;
+    var lines = runtime.logBuffer.slice();
+    var content = lines.join("\n") + "\n";
+    var written = false;
+    try {
+        files.append(runtime.logPath, content);
+        if (runtime.latestLogPath && runtime.latestLogPath !== runtime.logPath) {
+            files.append(runtime.latestLogPath, content);
+        }
+        written = true;
+    } catch (e) {
+        if (runtime.logPath !== CONFIG.backupLogPath) {
+            runtime.logPath = CONFIG.backupLogPath;
+            try {
+                files.append(runtime.logPath, content);
+                written = true;
+            } catch (ignored) {}
+        }
+    }
+    if (written) {
+        runtime.logBuffer = [];
+        runtime.useBufferedLog = false;
     }
 }
 
@@ -1768,6 +1804,10 @@ function rushFlow() {
     notifyUser("第二轮开始：正式抢票");
     logx("FLOW", "第二轮正式抢票开始");
 
+    // 启用异步日志缓冲，减少关键路径上的文件 I/O 延迟
+    runtime.useBufferedLog = true;
+    runtime.logBuffer = [];
+
     pressPoint("普通预约", getNormalBookingPoint(), CONFIG.fastPressDuration);
     sleep(650);
 
@@ -1792,7 +1832,12 @@ function rushFlow() {
 
     var confirm = getConfirmButtonPoint();
     pressPoint("确认预约", confirm, CONFIG.fastPressDuration);
+
     var captchaResult = solveCaptchaAfterConfirmForRush();
+
+    // 验证码处理完成后再刷新日志缓冲，避免 I/O 阻塞抢票链路
+    flushLogBuffer();
+
     if (captchaResult && captchaResult.manualFallback) {
         logx("FLOW", "第二轮已点击确认预约，验证码进入人工兜底 totalCost=" + (Date.now() - rushStart) + "ms reason=" + captchaResult.reason);
         return { ok: false, manualFallback: true, reason: captchaResult.reason };
@@ -1871,10 +1916,12 @@ function main() {
         }
     } catch (e) {
         failed = true;
+        flushLogBuffer(); // 异常时先刷新缓冲区，确保日志不丢失
         logx("FATAL", "脚本异常：" + e + " stack=" + (e && e.stack ? e.stack : ""));
         finalNotifyUser("预约脚本异常退出，请查看日志：" + e);
         captureDiagnostics("fatal_" + STAGE, CONFIG.diagnostics && CONFIG.diagnostics.ocrOnError);
     } finally {
+        flushLogBuffer(); // 确保所有缓冲日志写入
         saveCache();
         logx("END", "日志路径=" + runtime.logPath + " 缓存路径=" + runtime.cachePath);
         finalNotifyUser((failed ? "异常日志已写入：" : "日志已写入：") + runtime.logPath);
