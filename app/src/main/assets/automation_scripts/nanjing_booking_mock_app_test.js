@@ -1134,6 +1134,30 @@ function getSuspiciousCaptchaOcrReason(raw, parsed) {
     return "";
 }
 
+function shouldAcceptSuspiciousCaptchaOcr(suspicious, parsed) {
+    if (!suspicious) {
+        return false;
+    }
+    if (!parsed || !parsed.expression || parsed.answer === undefined || parsed.answer === null) {
+        return false;
+    }
+    if (!/^\d{1,2}[+\-\u00d7\u00f7]\d{1,2}$/.test(String(parsed.expression))) {
+        return false;
+    }
+    var answerText = String(parsed.answer);
+    if (!/^\d{1,2}$/.test(answerText)) {
+        return false;
+    }
+    var answer = parseInt(answerText, 10);
+    if (answer < 0 || answer > 99) {
+        return false;
+    }
+    if (!parsed.rules) parsed.rules = [];
+    appendCaptchaRule(parsed.rules, "accept_parsed_answer_despite_suspicious");
+    parsed.ruleText = parsed.rules.join("|");
+    return true;
+}
+
 function normalizeCaptchaOcrText(text) {
     return normalizeCaptchaOcrTextWithRules(text).text;
 }
@@ -1356,9 +1380,15 @@ function recognizeCaptchaByOcr(img, region, reason) {
         }
         var suspicious = getSuspiciousCaptchaOcrReason(raw, parsed);
         if (suspicious) {
-            logx("验证码 OCR 结果可疑，拒绝直接提交 reason=" + reason + " suspicious=" + suspicious +
-                " expression=" + parsed.expression + " answer=" + parsed.answer);
-            return { ok: false, reason: "ocr_suspicious reason=" + reason + " suspicious=" + suspicious + " raw=" + raw, raw: raw };
+            if (shouldAcceptSuspiciousCaptchaOcr(suspicious, parsed)) {
+                logx("OCR suspicious accepted reason=" + reason + " suspicious=" + suspicious +
+                    " expression=" + parsed.expression + " answer=" + parsed.answer +
+                    " rules=" + parsed.ruleText);
+            } else {
+                logx("验证码 OCR 结果可疑，拒绝直接提交 reason=" + reason + " suspicious=" + suspicious +
+                    " expression=" + parsed.expression + " answer=" + parsed.answer);
+                return { ok: false, reason: "ocr_suspicious reason=" + reason + " suspicious=" + suspicious + " raw=" + raw, raw: raw };
+            }
         }
         return {
             ok: true,
@@ -1412,9 +1442,15 @@ function recognizeCaptchaByPreprocessedOcr(img, region, reason) {
         }
         var suspicious = getSuspiciousCaptchaOcrReason(raw, parsed);
         if (suspicious) {
-            logx("验证码预处理 OCR 结果可疑，拒绝直接提交 reason=" + reason + " suspicious=" + suspicious +
-                " expression=" + parsed.expression + " answer=" + parsed.answer);
-            return { ok: false, reason: "preprocessed_ocr_suspicious reason=" + reason + " suspicious=" + suspicious + " raw=" + raw, raw: raw };
+            if (shouldAcceptSuspiciousCaptchaOcr(suspicious, parsed)) {
+                logx("Preprocessed OCR suspicious accepted reason=" + reason + " suspicious=" + suspicious +
+                    " expression=" + parsed.expression + " answer=" + parsed.answer +
+                    " rules=" + parsed.ruleText);
+            } else {
+                logx("验证码预处理 OCR 结果可疑，拒绝直接提交 reason=" + reason + " suspicious=" + suspicious +
+                    " expression=" + parsed.expression + " answer=" + parsed.answer);
+                return { ok: false, reason: "preprocessed_ocr_suspicious reason=" + reason + " suspicious=" + suspicious + " raw=" + raw, raw: raw };
+            }
         }
         return {
             ok: true,
