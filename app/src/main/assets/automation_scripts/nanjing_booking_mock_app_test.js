@@ -937,16 +937,16 @@ function evaluateCaptchaExpression(text) {
             return inferred;
         }
     }
-    if (!m) return null;
+    if (!m) {
+        var inferredTrimmed = inferMissingLeadingOneAndTrimTailOperand(normalized, normalizedResult.rules);
+        if (inferredTrimmed) return inferredTrimmed;
+        return null;
+    }
     var a = parseInt(m[1], 10);
     var op = m[2];
     var b = parseInt(m[3], 10);
-    var answer;
-    if (op === "+") answer = a + b;
-    else if (op === "-") answer = a - b;
-    else if (op === "\u00d7") answer = a * b;
-    else if (op === "\u00f7") answer = a / b;
-    else return null;
+    var answer = evaluateCaptchaOperation(a, op, b);
+    if (answer === null) return null;
     if (op === "+" && answer > 99) {
         var divideInferred = inferPlusShouldBeDivide(a, b, normalized, normalizedResult.rules);
         if (divideInferred) {
@@ -956,7 +956,13 @@ function evaluateCaptchaExpression(text) {
             return divideInferred;
         }
     }
-    if (Math.floor(answer) !== answer || answer < 0 || answer > 99) return null;
+    if (!isValidCaptchaAnswer(answer)) {
+        var inferredLeadingOne = inferMissingLeadingOneFromInvalidExpression(normalized, normalizedResult.rules);
+        if (inferredLeadingOne) return inferredLeadingOne;
+        inferredTrimmed = inferMissingLeadingOneAndTrimTailOperand(normalized, normalizedResult.rules);
+        if (inferredTrimmed) return inferredTrimmed;
+        return null;
+    }
     var rules = normalizedResult.rules.length ? normalizedResult.rules.slice() : ["direct_parse"];
     var prefix = normalized.substring(0, m.index);
     var tail = normalized.substring(m.index + m[0].length);
@@ -980,6 +986,83 @@ function evaluateCaptchaExpression(text) {
     appendCaptchaContextRules(rules, parsed);
     parsed.ruleText = rules.join("|");
     return parsed;
+}
+
+function evaluateCaptchaOperation(a, op, b) {
+    if (op === "+") return a + b;
+    if (op === "-") return a - b;
+    if (op === "\u00d7") return a * b;
+    if (op === "\u00f7") return a / b;
+    return null;
+}
+
+function isValidCaptchaAnswer(answer) {
+    return Math.floor(answer) === answer && answer >= 0 && answer <= 99;
+}
+
+function captchaInferencePrefixOk(normalized, matchIndex) {
+    var prefix = String(normalized).substring(0, matchIndex);
+    return !/[0-9+\-\u00d7\u00f7=?:\uff1a\/xX*]/.test(prefix);
+}
+
+function inferenceBaseRules(baseRules, rule) {
+    var rules = baseRules && baseRules.length ? baseRules.slice() : ["direct_parse"];
+    appendCaptchaRule(rules, rule);
+    return rules;
+}
+
+function buildInferredCaptchaExpression(normalized, matchIndex, rawCore, a, op, b, baseRules, rule) {
+    var answer = evaluateCaptchaOperation(a, op, b);
+    if (answer === null || !isValidCaptchaAnswer(answer)) return null;
+    var rules = inferenceBaseRules(baseRules, rule);
+    var parsed = {
+        expression: String(a) + op + String(b),
+        answer: String(answer),
+        normalized: normalized,
+        rules: rules
+    };
+    attachMatchedCaptchaContext(parsed, normalized, { index: matchIndex, 0: rawCore });
+    appendCaptchaContextRules(rules, parsed);
+    parsed.ruleText = rules.join("|");
+    return parsed;
+}
+
+function inferMissingLeadingOneAndTrimTailOperand(normalized, baseRules) {
+    var text = String(normalized || "");
+    var m = text.match(/(\d)([+\-\u00d7\u00f7])(\d{3})([=?]*)$/);
+    if (!m || !captchaInferencePrefixOk(text, m.index)) return null;
+    var right = m[3].substring(0, 2);
+    return buildInferredCaptchaExpression(
+        text,
+        m.index,
+        m[1] + m[2] + m[3],
+        10 + parseInt(m[1], 10),
+        m[2],
+        parseInt(right, 10),
+        baseRules,
+        "infer_missing_leading_one_and_trim_tail_operand"
+    );
+}
+
+function inferMissingLeadingOneFromInvalidExpression(normalized, baseRules) {
+    var text = String(normalized || "");
+    var m = text.match(/(\d)([+\-\u00d7\u00f7])(\d{1,2})([=?]*)$/);
+    if (!m || !captchaInferencePrefixOk(text, m.index)) return null;
+    var a = parseInt(m[1], 10);
+    var op = m[2];
+    var b = parseInt(m[3], 10);
+    var originalAnswer = evaluateCaptchaOperation(a, op, b);
+    if (originalAnswer !== null && isValidCaptchaAnswer(originalAnswer)) return null;
+    return buildInferredCaptchaExpression(
+        text,
+        m.index,
+        m[1] + op + m[3],
+        10 + a,
+        op,
+        b,
+        baseRules,
+        "infer_missing_leading_one_from_invalid_expression"
+    );
 }
 
 function appendCaptchaContextRules(rules, parsed) {
