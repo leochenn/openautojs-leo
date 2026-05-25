@@ -86,12 +86,22 @@ private fun LogUploadScreen() {
     var isUploading by remember { mutableStateOf(false) }
     var uploadProgress by remember { mutableStateOf("") }
     var showProgressDialog by remember { mutableStateOf(false) }
+    var showDeleteConfirmDialog by remember { mutableStateOf(false) }
 
     // 加载日志列表
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
             logEntries = loadLogEntries(context)
             isLoading = false
+        }
+    }
+
+    // 刷新列表的函数
+    fun refreshList() {
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                logEntries = loadLogEntries(context)
+            }
         }
     }
 
@@ -140,7 +150,7 @@ private fun LogUploadScreen() {
             } else {
                 // 提示文字
                 Text(
-                    text = "选择要上传的日志（最近 ${logEntries.size} 次运行）",
+                    text = "选择要操作的日志（最近 ${logEntries.size} 次运行）",
                     modifier = Modifier.padding(16.dp),
                     color = AppTextSecondary,
                     style = MaterialTheme.typography.bodyMedium
@@ -165,34 +175,69 @@ private fun LogUploadScreen() {
                     }
                 }
 
-                // 上传按钮
+                // 底部按钮区域
                 val selectedCount = logEntries.count { it.isSelected }
-                Button(
-                    onClick = {
-                        if (selectedCount > 0) {
-                            showProgressDialog = true
-                            scope.launch {
-                                uploadLogs(context, logEntries.filter { it.isSelected }) { progress ->
-                                    uploadProgress = progress
-                                }
-                                showProgressDialog = false
-                                isUploading = false
-                            }
-                        } else {
-                            Toast.makeText(context, "请先选择要上传的日志", Toast.LENGTH_SHORT).show()
-                        }
-                    },
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(16.dp),
-                    shape = ButtonShape,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = AppPrimary,
-                        contentColor = Color.White
-                    ),
-                    enabled = !isUploading
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Text(text = if (selectedCount > 0) "上传选中的 $selectedCount 条日志" else "上传日志")
+                    // 删除按钮
+                    OutlinedButton(
+                        onClick = {
+                            if (selectedCount > 0) {
+                                showDeleteConfirmDialog = true
+                            } else {
+                                Toast.makeText(context, "请先选择要删除的日志", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        shape = ButtonShape,
+                        border = BorderStroke(1.dp, AppError.copy(alpha = 0.55f)),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = AppError),
+                        enabled = !isUploading
+                    ) {
+                        Text(text = if (selectedCount > 0) "删除选中 ($selectedCount)" else "删除")
+                    }
+
+                    // 上传按钮
+                    Button(
+                        onClick = {
+                            if (selectedCount > 0) {
+                                val selectedEntries = logEntries.filter { it.isSelected }
+                                val totalSize = selectedEntries.sumOf { it.totalSize }
+                                val maxSize = 10 * 1024 * 1024L // 10MB
+                                if (totalSize > maxSize) {
+                                    Toast.makeText(
+                                        context,
+                                        "选中的日志总大小 ${formatFileSize(totalSize)} 超过 10MB，请减少选择数量",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                } else {
+                                    showProgressDialog = true
+                                    scope.launch {
+                                        uploadLogs(context, selectedEntries) { progress ->
+                                            uploadProgress = progress
+                                        }
+                                        showProgressDialog = false
+                                        isUploading = false
+                                    }
+                                }
+                            } else {
+                                Toast.makeText(context, "请先选择要上传的日志", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        shape = ButtonShape,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AppPrimary,
+                            contentColor = Color.White
+                        ),
+                        enabled = !isUploading
+                    ) {
+                        Text(text = if (selectedCount > 0) "上传 ($selectedCount)" else "上传")
+                    }
                 }
             }
         }
@@ -203,6 +248,27 @@ private fun LogUploadScreen() {
         ProgressDialog(
             progressText = uploadProgress,
             onDismissRequest = { /* 不允许关闭 */ }
+        )
+    }
+
+    // 删除确认对话框
+    if (showDeleteConfirmDialog) {
+        val selectedEntries = logEntries.filter { it.isSelected }
+        DeleteConfirmDialog(
+            selectedCount = selectedEntries.size,
+            onDismissRequest = { showDeleteConfirmDialog = false },
+            onConfirm = {
+                showDeleteConfirmDialog = false
+                scope.launch {
+                    val success = deleteLogEntries(selectedEntries)
+                    if (success) {
+                        Toast.makeText(context, "删除成功", Toast.LENGTH_SHORT).show()
+                        refreshList()
+                    } else {
+                        Toast.makeText(context, "删除失败", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
         )
     }
 }
@@ -287,6 +353,43 @@ private fun ProgressDialog(
     }
 }
 
+@Composable
+private fun DeleteConfirmDialog(
+    selectedCount: Int,
+    onDismissRequest: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismissRequest,
+        title = {
+            Text(
+                text = "确认删除",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold
+            )
+        },
+        text = {
+            Text(
+                text = "确定要删除选中的 $selectedCount 条日志吗？\n\n删除后无法恢复。",
+                color = AppTextPrimary
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onConfirm,
+                colors = ButtonDefaults.textButtonColors(contentColor = AppError)
+            ) {
+                Text(text = "删除")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismissRequest) {
+                Text(text = "取消")
+            }
+        }
+    )
+}
+
 // 加载日志条目
 private fun loadLogEntries(context: Context): List<LogEntry> {
     val logDir = File(
@@ -330,13 +433,16 @@ private suspend fun uploadLogs(
             }
             val zipFile = compressLogs(selectedEntries)
 
-            // 2. 上传到 ntfy
+            // 2. 构建设备信息
+            val deviceInfo = buildDeviceInfo(selectedEntries)
+
+            // 3. 上传到 ntfy
             withContext(Dispatchers.Main) {
                 onProgress("正在上传...")
             }
-            val success = uploadToNtfy(zipFile)
+            val success = uploadToNtfy(zipFile, deviceInfo)
 
-            // 3. 清理临时文件
+            // 4. 清理临时文件
             zipFile.delete()
 
             withContext(Dispatchers.Main) {
@@ -359,7 +465,9 @@ private suspend fun uploadLogs(
 // 压缩日志文件
 private fun compressLogs(entries: List<LogEntry>): File {
     val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-    val zipFile = File.createTempFile("OpenAutoJS_Log_$timestamp", ".zip")
+    val fileName = "OpenAutoJS_Log_$timestamp.zip"
+    val cacheDir = org.autojs.autojs.App.app.cacheDir
+    val zipFile = File(cacheDir, fileName)
 
     ZipOutputStream(BufferedOutputStream(FileOutputStream(zipFile))).use { zos ->
         entries.forEach { entry ->
@@ -381,20 +489,48 @@ private fun compressLogs(entries: List<LogEntry>): File {
     return zipFile
 }
 
-// 上传到 ntfy 服务
-private fun uploadToNtfy(zipFile: File): Boolean {
+// 构建设备信息（单行，用 | 分隔，适配 HTTP header）
+private fun buildDeviceInfo(selectedEntries: List<LogEntry>): String {
+    val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
+    val totalSize = selectedEntries.sumOf { it.totalSize }
+    val logNames = selectedEntries.joinToString(", ") { it.dirName }
+
+    return "设备: ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} | " +
+            "系统: Android ${android.os.Build.VERSION.RELEASE} | " +
+            "App版本: ${getAppVersion()} | " +
+            "日志数量: ${selectedEntries.size} 次运行 | " +
+            "日志大小: ${formatFileSize(totalSize)} | " +
+            "上传时间: $timestamp | " +
+            "包含日志: $logNames"
+}
+
+// 获取 App 版本
+private fun getAppVersion(): String {
+    return try {
+        val packageInfo = org.autojs.autojs.App.app.packageManager.getPackageInfo(
+            org.autojs.autojs.App.app.packageName, 0
+        )
+        packageInfo.versionName ?: "unknown"
+    } catch (e: Exception) {
+        "unknown"
+    }
+}
+
+// 上传到 ntfy 服务（一条消息：设备信息 + zip 附件）
+private fun uploadToNtfy(zipFile: File, deviceInfo: String): Boolean {
     val url = java.net.URL("https://ntfy.leochen3155.site/openautojs")
     val connection = url.openConnection() as java.net.HttpURLConnection
 
     try {
         connection.requestMethod = "POST"
         connection.doOutput = true
-        connection.setRequestProperty("Filename", zipFile.name)
         connection.setRequestProperty("Title", "OpenAutoJS 日志上传")
+        connection.setRequestProperty("Filename", zipFile.name)
+        connection.setRequestProperty("Message", deviceInfo)
         connection.connectTimeout = 30000
         connection.readTimeout = 30000
 
-        // 写入文件
+        // 上传 zip 文件作为附件
         FileInputStream(zipFile).use { fis ->
             BufferedInputStream(fis).use { bis ->
                 connection.outputStream.use { os ->
@@ -408,6 +544,34 @@ private fun uploadToNtfy(zipFile: File): Boolean {
     } finally {
         connection.disconnect()
     }
+}
+
+// 删除日志条目
+private suspend fun deleteLogEntries(entries: List<LogEntry>): Boolean {
+    return withContext(Dispatchers.IO) {
+        try {
+            entries.forEach { entry ->
+                deleteDirectory(entry.dirPath)
+            }
+            true
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
+}
+
+// 递归删除目录
+private fun deleteDirectory(dir: File): Boolean {
+    if (dir.isDirectory) {
+        val children = dir.listFiles()
+        if (children != null) {
+            for (child in children) {
+                deleteDirectory(child)
+            }
+        }
+    }
+    return dir.delete()
 }
 
 // 格式化文件大小
