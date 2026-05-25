@@ -54,6 +54,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.window.Dialog
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import org.autojs.autojs.external.inputmethod.CaptchaInputMethodStatus
 import org.autojs.autojs.model.automation.AutomationScripts
@@ -65,6 +66,7 @@ import org.autojs.autojs.ui.captcha.CaptchaCalibrationActivity
 import org.autojs.autojs.ui.compose.theme.AutoXJsTheme
 import org.autojs.autojs.ui.main.MainActivity
 import org.autojs.autojs.ui.main.rememberExternalStoragePermissionsState
+import org.autojs.autojs.ui.logupload.LogUploadActivity
 import org.autojs.autojs.ui.settings.InputMethodGuideActivity
 import org.openautojs.autojs.R
 
@@ -98,6 +100,9 @@ class BeginnerHomeActivity : ComponentActivity() {
                         initialConfig = initialConfig,
                         openAdvancedMode = {
                             startActivity(Intent(this, MainActivity::class.java))
+                        },
+                        openLogUpload = {
+                            startActivity(Intent(this, LogUploadActivity::class.java))
                         }
                     )
                 }
@@ -115,7 +120,8 @@ class BeginnerHomeActivity : ComponentActivity() {
 private fun BeginnerHomeScreen(
     refreshTick: Int,
     initialConfig: BookingConfig,
-    openAdvancedMode: () -> Unit
+    openAdvancedMode: () -> Unit,
+    openLogUpload: () -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val storagePermissions = rememberExternalStoragePermissionsState {}
@@ -154,6 +160,8 @@ private fun BeginnerHomeScreen(
     )
     val configError = AutomationScripts.validateConfig(config)
 
+    var showSettingsDialog by rememberSaveable { mutableStateOf(false) }
+
     Scaffold(
         containerColor = Color.White,
         topBar = {
@@ -166,10 +174,10 @@ private fun BeginnerHomeScreen(
                 ),
                 actions = {
                     TextButton(
-                        onClick = openAdvancedMode,
+                        onClick = { showSettingsDialog = true },
                         colors = ButtonDefaults.textButtonColors(contentColor = AppPrimary)
                     ) {
-                        Text(text = "高级模式")
+                        Text(text = "设置")
                     }
                 }
             )
@@ -284,6 +292,79 @@ private fun BeginnerHomeScreen(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(text = "运行脚本")
+                }
+            }
+        }
+    }
+
+    if (showSettingsDialog) {
+        SettingsDialog(
+            onDismissRequest = { showSettingsDialog = false },
+            onAdvancedMode = {
+                showSettingsDialog = false
+                openAdvancedMode()
+            },
+            onLogUpload = {
+                showSettingsDialog = false
+                openLogUpload()
+            }
+        )
+    }
+}
+
+@Composable
+private fun SettingsDialog(
+    onDismissRequest: () -> Unit,
+    onAdvancedMode: () -> Unit,
+    onLogUpload: () -> Unit
+) {
+    Dialog(onDismissRequest = onDismissRequest) {
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = Color.White
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp)
+            ) {
+                Text(
+                    text = "设置",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = AppTextPrimary
+                )
+                Spacer(modifier = Modifier.height(20.dp))
+
+                OutlinedButton(
+                    onClick = onAdvancedMode,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = ButtonShape,
+                    border = BorderStroke(1.dp, AppPrimary.copy(alpha = 0.55f)),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = AppPrimary)
+                ) {
+                    Text(text = "高级模式")
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                OutlinedButton(
+                    onClick = onLogUpload,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = ButtonShape,
+                    border = BorderStroke(1.dp, AppPrimary.copy(alpha = 0.55f)),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = AppPrimary)
+                ) {
+                    Text(text = "上传日志")
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                TextButton(
+                    onClick = onDismissRequest,
+                    modifier = Modifier.align(Alignment.End)
+                ) {
+                    Text(text = "关闭")
                 }
             }
         }
