@@ -193,6 +193,25 @@ function createNanjingBookingCaptchaSolver(deps) {
         }
     }
 
+    function saveCaptchaSceneBeforeSolve(img) {
+        if (!CONFIG.captcha || CONFIG.captcha.saveSceneBeforeSolve !== true) return;
+
+        var saveStart = Date.now();
+        try {
+            if (!img) {
+                throw new Error("screen_image_empty");
+            }
+            var path = CONFIG.outputDir + "/captcha_scene_before_solve_" + deps.fileTimeText() + ".png";
+            var saved = images.save(img, path);
+            if (saved === false) {
+                throw new Error("images.save returned false");
+            }
+            logx("验证码处理前现场截图已保存 path=" + path + " cost=" + (Date.now() - saveStart) + "ms");
+        } catch (e) {
+            logx("验证码处理前现场截图保存失败 err=" + e + " cost=" + (Date.now() - saveStart) + "ms");
+        }
+    }
+
     function preprocessCaptchaClipForOcr(clip) {
         var gray = null;
         var processed = null;
@@ -2155,6 +2174,7 @@ function createNanjingBookingCaptchaSolver(deps) {
             captureCost = Date.now() - captureStart;
             stats.capture = captureCost;
             logx("验证码截图完成 capture=" + captureCost + "ms");
+            saveCaptchaSceneBeforeSolve(img);
 
             recognizeStart = Date.now();
             var trackProbe = detectSliderCaptchaByTrack(img);
