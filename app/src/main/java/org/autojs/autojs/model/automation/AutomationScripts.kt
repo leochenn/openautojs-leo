@@ -20,7 +20,6 @@ object AutomationScripts {
     private const val CONFIG_FILE_NAME = "nanjing_booking_config.json"
     const val CAPTCHA_PROFILE_FILE_NAME = CaptchaCalibrationStore.PROFILE_FILE_NAME
     const val MAIN_SCRIPT_NAME = "nanjing_booking_auto.js"
-    const val CAPTCHA_SIMULATOR_SCRIPT_NAME = "nanjing_booking_captcha_profile_simulator.js"
 
     val defaultConfig = BookingConfig()
 
@@ -41,11 +40,6 @@ object AutomationScripts {
     fun mainScriptFile(context: Context): File {
         ensureReady(context)
         return File(scriptsDir(context), MAIN_SCRIPT_NAME)
-    }
-
-    fun captchaSimulatorScriptFile(context: Context): File {
-        ensureReady(context)
-        return File(scriptsDir(context), CAPTCHA_SIMULATOR_SCRIPT_NAME)
     }
 
     fun configFile(context: Context): File {

@@ -87,7 +87,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.delay
 import org.autojs.autojs.model.automation.AutomationScripts
 import org.autojs.autojs.model.automation.CaptchaCalibrationProfile
 import org.autojs.autojs.model.automation.CaptchaCalibrationStore
@@ -95,20 +94,14 @@ import org.autojs.autojs.model.automation.CaptchaMathProfile
 import org.autojs.autojs.model.automation.CaptchaRegion
 import org.autojs.autojs.model.automation.CaptchaScreenSize
 import org.autojs.autojs.model.automation.CaptchaSliderProfile
-import org.autojs.autojs.model.script.ScriptFile
-import org.autojs.autojs.model.script.Scripts
 import org.autojs.autojs.ui.compose.theme.AutoXJsTheme
-import org.json.JSONObject
 import org.openautojs.autojs.R
-import java.io.File
-import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
 private val AppPrimary = Color(0xFF009688)
-private val AppAccent = Color(0xFF03A9F4)
 private val AppTextPrimary = Color(0xFF282C2F)
 private val AppTextSecondary = Color(0xFF6F767A)
 private val AppDivider = Color(0xFFF2F3F5)
@@ -139,7 +132,6 @@ private data class AnnotationItem(
 private data class CalibrationType(
     val key: String,
     val title: String,
-    val sourceName: String,
     val items: List<AnnotationItem>
 )
 
@@ -180,14 +172,12 @@ private val SliderItems = listOf(
 private val MathType = CalibrationType(
     key = TYPE_MATH,
     title = "数学验证码",
-    sourceName = "math",
     items = MathItems
 )
 
 private val SliderType = CalibrationType(
     key = TYPE_SLIDER,
     title = "滑块验证码",
-    sourceName = "slider",
     items = SliderItems
 )
 
@@ -245,10 +235,6 @@ private fun CaptchaCalibrationScreen(
     var sliderImage by remember { mutableStateOf<CaptchaSourceImage?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
     var messageIsError by remember { mutableStateOf(false) }
-    var simulationRunning by remember { mutableStateOf(false) }
-    var simulationText by remember { mutableStateOf<String?>(null) }
-    var simulationTextIsError by remember { mutableStateOf(false) }
-    var simulationRunId by remember { mutableStateOf(0) }
     var dimensionError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(profile) {
@@ -259,26 +245,6 @@ private fun CaptchaCalibrationScreen(
     LaunchedEffect(selectedTypeKey) {
         message = null
         messageIsError = false
-        simulationText = null
-        simulationTextIsError = false
-    }
-
-    LaunchedEffect(simulationRunId) {
-        if (!simulationRunning) return@LaunchedEffect
-        val resultFile = CaptchaCalibrationStore.simulationResultFile(context)
-        repeat(60) {
-            delay(250)
-            val resultText = readSimulationResult(resultFile)
-            if (resultText != null) {
-                simulationText = resultText.first
-                simulationTextIsError = resultText.second
-                simulationRunning = false
-                return@LaunchedEffect
-            }
-        }
-        simulationText = "模拟识别超时，请查看脚本日志或稍后重试"
-        simulationTextIsError = true
-        simulationRunning = false
     }
 
     val imagePickerLauncher = rememberLauncherForActivityResult(
@@ -293,7 +259,6 @@ private fun CaptchaCalibrationScreen(
                 )
                 val imgScreenSize = CaptchaCalibrationStore.currentScreenSize(context)
                 if (bitmap.width == imgScreenSize.width && bitmap.height == imgScreenSize.height) {
-                    saveSourceImage(context, bitmap, selectedType)
                     if (selectedType.key == TYPE_MATH) {
                         mathImage = sourceImage
                     } else {
@@ -363,14 +328,8 @@ private fun CaptchaCalibrationScreen(
                     sourceImage = currentImage,
                     type = selectedType,
                     regions = currentRegions,
-                    screenSize = screenSize,
-                    mathRegions = mathRegions,
-                    sliderRegions = sliderRegions,
                     message = message,
                     messageIsError = messageIsError,
-                    simulationText = simulationText,
-                    simulationTextIsError = simulationTextIsError,
-                    simulationRunning = simulationRunning,
                     onBack = { step = 1 },
                     onRegionChange = { key, region ->
                         if (selectedType.key == TYPE_MATH) {
@@ -384,25 +343,6 @@ private fun CaptchaCalibrationScreen(
                             mathRegions = mathRegions - key
                         } else {
                             sliderRegions = sliderRegions - key
-                        }
-                    },
-                    onSimulate = {
-                        val startResult = startSimulation(
-                            context = context,
-                            type = selectedType,
-                            screenSize = screenSize,
-                            sourceImage = currentImage,
-                            mathRegions = mathRegions,
-                            sliderRegions = sliderRegions
-                        )
-                        if (startResult == null) {
-                            simulationText = "${selectedType.title}模拟识别已启动"
-                            simulationTextIsError = false
-                            simulationRunning = true
-                            simulationRunId++
-                        } else {
-                            simulationText = startResult
-                            simulationTextIsError = true
                         }
                     },
                     onSave = {
@@ -679,18 +619,11 @@ private fun FullScreenAnnotateStep(
     sourceImage: CaptchaSourceImage?,
     type: CalibrationType,
     regions: Map<String, CaptchaRegion>,
-    screenSize: CaptchaScreenSize,
-    mathRegions: Map<String, CaptchaRegion>,
-    sliderRegions: Map<String, CaptchaRegion>,
     message: String?,
     messageIsError: Boolean,
-    simulationText: String?,
-    simulationTextIsError: Boolean,
-    simulationRunning: Boolean,
     onBack: () -> Unit,
     onRegionChange: (String, CaptchaRegion) -> Unit,
     onDeleteRegion: (String) -> Unit,
-    onSimulate: () -> Unit,
     onSave: () -> Unit
 ) {
     val context = LocalContext.current
@@ -773,14 +706,6 @@ private fun FullScreenAnnotateStep(
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
-                if (simulationText != null) {
-                    Text(
-                        text = simulationText,
-                        color = if (simulationTextIsError) AppError else AppPrimary,
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -824,16 +749,6 @@ private fun FullScreenAnnotateStep(
                         ) {
                             Text(text = "完成此区域")
                         }
-                    }
-                    OutlinedButton(
-                        modifier = Modifier.weight(1f),
-                        onClick = onSimulate,
-                        enabled = !simulationRunning && allCompleted,
-                        shape = ButtonShape,
-                        border = BorderStroke(1.dp, AppAccent.copy(alpha = 0.7f)),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = AppAccent)
-                    ) {
-                        Text(text = if (simulationRunning) "识别中" else "模拟验证")
                     }
                 }
             }
@@ -1418,153 +1333,8 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawDeleteHandle(
 }
 
 // ---------------------------------------------------------------------------
-// 模拟与保存
+// 保存
 // ---------------------------------------------------------------------------
-
-private fun startSimulation(
-    context: Context,
-    type: CalibrationType,
-    screenSize: CaptchaScreenSize,
-    sourceImage: CaptchaSourceImage?,
-    mathRegions: Map<String, CaptchaRegion>,
-    sliderRegions: Map<String, CaptchaRegion>
-): String? {
-    if (sourceImage == null) {
-        return "请先选择${type.title}截图"
-    }
-    val currentRegions = if (type.key == TYPE_MATH) mathRegions else sliderRegions
-    val missing = missingItems(type.items, currentRegions)
-    if (missing.isNotEmpty()) {
-        return "请先完成：${missing.joinToString("、")}"
-    }
-    return try {
-        AutomationScripts.ensureReady(context)
-        val requestFile = CaptchaCalibrationStore.simulationRequestFile(context)
-        val resultFile = CaptchaCalibrationStore.simulationResultFile(context)
-        if (resultFile.exists()) {
-            resultFile.delete()
-        }
-        val profile = buildTransientProfile(
-            context = context,
-            screenSize = screenSize,
-            mathRegions = mathRegions,
-            sliderRegions = sliderRegions
-        )
-        val sourceFile = CaptchaCalibrationStore.sourceImageFile(context, type.sourceName)
-        if (!sourceFile.exists()) {
-            return "${type.title}来源截图未写入，请重新选择截图"
-        }
-        requestFile.parentFile?.mkdirs()
-        val requestJson = JSONObject()
-            .put("schemaVersion", 1)
-            .put("type", type.key)
-            .put("imagePath", sourceFile.path)
-            .put("resultPath", resultFile.path)
-            .put("profile", profile.toJson())
-        requestFile.writeText(requestJson.toString(2))
-
-        val scriptFile = AutomationScripts.captchaSimulatorScriptFile(context)
-        val execution = Scripts.run(ScriptFile(scriptFile.path))
-        if (execution == null) {
-            "模拟识别脚本启动失败"
-        } else {
-            null
-        }
-    } catch (e: Exception) {
-        e.message ?: "模拟识别启动失败"
-    }
-}
-
-private fun buildTransientProfile(
-    context: Context,
-    screenSize: CaptchaScreenSize,
-    mathRegions: Map<String, CaptchaRegion>,
-    sliderRegions: Map<String, CaptchaRegion>
-): CaptchaCalibrationProfile {
-    val currentProfile = AutomationScripts.loadCaptchaProfile(context)
-    val baseProfile = if (
-        currentProfile != null &&
-        currentProfile.deviceWidth == screenSize.width &&
-        currentProfile.deviceHeight == screenSize.height
-    ) {
-        currentProfile
-    } else {
-        CaptchaCalibrationStore.emptyProfile(context)
-    }
-    return baseProfile.copy(
-        deviceWidth = screenSize.width,
-        deviceHeight = screenSize.height,
-        mathProfile = CaptchaMathProfile(
-            completed = mathRegions[KEY_MATH_EXPRESSION]?.isValid == true &&
-                mathRegions[KEY_MATH_INPUT]?.isValid == true &&
-                mathRegions[KEY_MATH_SUBMIT]?.isValid == true,
-            expressionRegion = mathRegions[KEY_MATH_EXPRESSION],
-            inputRegion = mathRegions[KEY_MATH_INPUT],
-            submitRegion = mathRegions[KEY_MATH_SUBMIT]
-        ),
-        sliderProfile = CaptchaSliderProfile(
-            completed = sliderRegions[KEY_SLIDER_IMAGE_SEARCH]?.isValid == true &&
-                sliderRegions[KEY_SLIDER_HANDLE]?.isValid == true &&
-                sliderRegions[KEY_SLIDER_TRACK]?.isValid == true &&
-                sliderRegions[KEY_SLIDER_SUBMIT]?.isValid == true,
-            imageSearchRegion = sliderRegions[KEY_SLIDER_IMAGE_SEARCH],
-            handleRegion = sliderRegions[KEY_SLIDER_HANDLE],
-            trackRegion = sliderRegions[KEY_SLIDER_TRACK],
-            submitRegion = sliderRegions[KEY_SLIDER_SUBMIT]
-        )
-    )
-}
-
-private fun readSimulationResult(resultFile: File): Pair<String, Boolean>? {
-    if (!resultFile.exists()) {
-        return null
-    }
-    return try {
-        val json = JSONObject(resultFile.readText())
-        formatSimulationResult(json)
-    } catch (e: Exception) {
-        "模拟识别结果读取失败：${e.message ?: "未知错误"}" to true
-    }
-}
-
-private fun formatSimulationResult(json: JSONObject): Pair<String, Boolean> {
-    val ok = json.optBoolean("ok", false)
-    val type = json.optString("type")
-    if (type == TYPE_MATH) {
-        return if (ok) {
-            val raw = json.optString("raw")
-            val expression = json.optString("expression")
-            val answer = json.optString("answer")
-            val detail = json.optString("detail")
-            "模拟识别成功：$expression = $answer，raw=$raw，$detail" to false
-        } else {
-            "模拟识别失败：${json.optString("reason", "unknown")}" to true
-        }
-    }
-    if (type == TYPE_SLIDER) {
-        return if (ok) {
-            val start = json.optJSONObject("startPoint")
-            val target = json.optJSONObject("targetPoint")
-            val trackRatio = json.optDouble("trackRatio", 0.0)
-            val arrowRatio = json.optDouble("arrowRatio", 0.0)
-            val startText = pointJsonText(start)
-            val targetText = pointJsonText(target)
-            "模拟识别成功：起点$startText，目标$targetText，轨道=${ratioText(trackRatio)}，箭头=${ratioText(arrowRatio)}" to false
-        } else {
-            "模拟识别失败：${json.optString("reason", "unknown")}" to true
-        }
-    }
-    return "模拟识别失败：${json.optString("reason", "unknown")}" to true
-}
-
-private fun pointJsonText(json: JSONObject?): String {
-    if (json == null) return "(无)"
-    return "(${json.optInt("x")},${json.optInt("y")})"
-}
-
-private fun ratioText(value: Double): String {
-    return String.format(Locale.US, "%.3f", value)
-}
 
 private fun saveCurrentProfile(
     context: Context,
@@ -1642,15 +1412,6 @@ private fun decodeBitmap(context: Context, uri: Uri): Bitmap {
         }
         BitmapFactory.decodeStream(input, null, options)
     } ?: throw IllegalArgumentException("无法解码图片")
-}
-
-private fun saveSourceImage(context: Context, bitmap: Bitmap, type: CalibrationType) {
-    AutomationScripts.ensureReady(context)
-    val file: File = CaptchaCalibrationStore.sourceImageFile(context, type.sourceName)
-    file.parentFile?.mkdirs()
-    file.outputStream().use { output ->
-        bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
-    }
 }
 
 private fun missingItems(

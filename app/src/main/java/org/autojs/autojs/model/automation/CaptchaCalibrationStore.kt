@@ -13,28 +13,9 @@ data class CaptchaScreenSize(
 
 object CaptchaCalibrationStore {
     const val PROFILE_FILE_NAME = "captcha_layout_profile.json"
-    private const val CALIBRATION_DIR_NAME = "captcha_calibration"
-    private const val SIMULATION_REQUEST_FILE_NAME = "captcha_calibration_request.json"
-    private const val SIMULATION_RESULT_FILE_NAME = "captcha_calibration_result.json"
 
     fun profileFile(context: Context): File {
         return File(AutomationScripts.scriptsDir(context), PROFILE_FILE_NAME)
-    }
-
-    fun calibrationDir(context: Context): File {
-        return File(AutomationScripts.scriptsDir(context), CALIBRATION_DIR_NAME)
-    }
-
-    fun sourceImageFile(context: Context, type: String): File {
-        return File(calibrationDir(context), "${type}_source.png")
-    }
-
-    fun simulationRequestFile(context: Context): File {
-        return File(calibrationDir(context), SIMULATION_REQUEST_FILE_NAME)
-    }
-
-    fun simulationResultFile(context: Context): File {
-        return File(calibrationDir(context), SIMULATION_RESULT_FILE_NAME)
     }
 
     fun emptyProfile(context: Context): CaptchaCalibrationProfile {
