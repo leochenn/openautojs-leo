@@ -9,6 +9,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Paint
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.view.View
 import android.view.WindowManager
@@ -23,6 +24,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -65,6 +67,7 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
@@ -81,6 +84,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
@@ -101,6 +105,7 @@ import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 private val AppPrimary = Color(0xFF009688)
 private val AppAccent = Color(0xFF03A9F4)
@@ -111,6 +116,8 @@ private val AppError = Color(0xFFFD7778)
 private val AppWarning = Color(0xFFFF9800)
 private val CardShape = RoundedCornerShape(8.dp)
 private val ButtonShape = RoundedCornerShape(4.dp)
+private const val MIN_IMAGE_SCALE = 1f
+private const val MAX_IMAGE_SCALE = 6f
 
 private const val TYPE_MATH = "math"
 private const val TYPE_SLIDER = "slider"
@@ -141,9 +148,15 @@ private data class CaptchaSourceImage(
     val displayName: String
 )
 
+private data class ImageViewport(
+    val scale: Float,
+    val offset: Offset
+)
+
 private enum class RegionEditMode {
     None,
     Create,
+    ImagePan,
     Move,
     ResizeLeft,
     ResizeRight,
@@ -895,7 +908,7 @@ private fun StepIndicator(
 }
 
 // ---------------------------------------------------------------------------
-// 全屏画布（复用原有手势逻辑 + 长按删除）
+// 全屏画布（复用原有手势逻辑 + 长按拖动）
 // ---------------------------------------------------------------------------
 
 @Composable
@@ -909,19 +922,92 @@ private fun FullScreenRegionCanvas(
     onDeleteSelected: (String) -> Unit
 ) {
     val bitmap = sourceImage.bitmap
+    val imageBitmap = remember(bitmap) { bitmap.asImageBitmap() }
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
+    var imageScale by remember(bitmap) { mutableStateOf(MIN_IMAGE_SCALE) }
+    var imageOffset by remember(bitmap) { mutableStateOf(Offset.Zero) }
     var dragStart by remember { mutableStateOf<Offset?>(null) }
     var dragCurrent by remember { mutableStateOf<Offset?>(null) }
     var gestureStart by remember { mutableStateOf<Offset?>(null) }
     var gestureBaseRegion by remember { mutableStateOf<CaptchaRegion?>(null) }
+    var gestureBaseImageOffset by remember { mutableStateOf<Offset?>(null) }
     var editMode by remember { mutableStateOf(RegionEditMode.None) }
     val selectedRegion = selectedItem?.let { regions[it.key] }
     val latestSelectedRegion by rememberUpdatedState(selectedRegion)
+    val viewport = ImageViewport(scale = imageScale, offset = imageOffset)
+    val latestViewport by rememberUpdatedState(viewport)
+    val latestImageScale by rememberUpdatedState(imageScale)
+    val latestImageOffset by rememberUpdatedState(imageOffset)
+
+    LaunchedEffect(canvasSize, bitmap) {
+        if (canvasSize.width > 0 && canvasSize.height > 0) {
+            imageScale = imageScale.coerceIn(MIN_IMAGE_SCALE, MAX_IMAGE_SCALE)
+            imageOffset = clampImageOffset(
+                offset = imageOffset,
+                canvasSize = canvasSize,
+                bitmap = bitmap,
+                scale = imageScale
+            )
+        }
+    }
 
     Box(
         modifier = modifier
+            .clipToBounds()
             .onSizeChanged { canvasSize = it }
-            .pointerInput(selectedItem?.key, canvasSize) {
+            .pointerInput(canvasSize, bitmap) {
+                awaitPointerEventScope {
+                    var previousCentroid: Offset? = null
+                    var previousDistance = 0f
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val pressed = event.changes.filter { it.pressed }
+                        if (pressed.size < 2) {
+                            previousCentroid = null
+                            previousDistance = 0f
+                            continue
+                        }
+                        val points = pressed.map { it.position }
+                        val centroid = centroidOf(points)
+                        val distance = averageDistance(points, centroid)
+                        val lastCentroid = previousCentroid
+                        if (
+                            lastCentroid != null &&
+                            previousDistance > 0f &&
+                            distance > 0f &&
+                            canvasSize.width > 0 &&
+                            canvasSize.height > 0
+                        ) {
+                            val oldScale = imageScale
+                            val nextScale = (oldScale * (distance / previousDistance))
+                                .coerceIn(MIN_IMAGE_SCALE, MAX_IMAGE_SCALE)
+                            val zoomRatio = if (oldScale == 0f) 1f else nextScale / oldScale
+                            val pan = centroid - lastCentroid
+                            val rawOffset = Offset(
+                                x = (imageOffset.x + pan.x - centroid.x) * zoomRatio + centroid.x,
+                                y = (imageOffset.y + pan.y - centroid.y) * zoomRatio + centroid.y
+                            )
+                            imageScale = nextScale
+                            imageOffset = clampImageOffset(
+                                offset = rawOffset,
+                                canvasSize = canvasSize,
+                                bitmap = bitmap,
+                                scale = nextScale
+                            )
+                            dragStart = null
+                            dragCurrent = null
+                            gestureStart = null
+                            gestureBaseRegion = null
+                            gestureBaseImageOffset = null
+                            editMode = RegionEditMode.None
+                            pressed.forEach { it.consume() }
+                        }
+                        previousCentroid = centroid
+                        previousDistance = distance
+                    }
+                }
+            }
+            .pointerInput(selectedItem?.key, canvasSize, bitmap) {
                 val activeItem = selectedItem ?: return@pointerInput
                 val deleteVisualSize = 32.dp.toPx()
                 val deleteHitSize = 48.dp.toPx()
@@ -930,7 +1016,7 @@ private fun FullScreenRegionCanvas(
                     onTap = { rawOffset ->
                         val offset = clampOffset(rawOffset, canvasSize)
                         val rect = latestSelectedRegion?.let {
-                            regionToDisplayRect(it, canvasSize, bitmap)
+                            regionToDisplayRect(it, latestViewport)
                         }
                         if (
                             rect != null &&
@@ -942,17 +1028,6 @@ private fun FullScreenRegionCanvas(
                                 gapPx = deleteGap
                             ).contains(offset)
                         ) {
-                            onDeleteSelected(activeItem.key)
-                            editMode = RegionEditMode.None
-                            dragStart = null
-                            dragCurrent = null
-                            gestureStart = null
-                            gestureBaseRegion = null
-                        }
-                    },
-                    onLongPress = {
-                        // 长按删除当前选中区域
-                        if (latestSelectedRegion != null) {
                             onDeleteSelected(activeItem.key)
                             editMode = RegionEditMode.None
                             dragStart = null
@@ -963,7 +1038,61 @@ private fun FullScreenRegionCanvas(
                     }
                 )
             }
-            .pointerInput(selectedItem?.key, canvasSize) {
+            .pointerInput(selectedItem?.key, canvasSize, bitmap) {
+                val activeItem = selectedItem ?: return@pointerInput
+                detectDragGesturesAfterLongPress(
+                    onDragStart = { rawOffset ->
+                        val offset = clampOffset(rawOffset, canvasSize)
+                        val currentRegion = latestSelectedRegion
+                        val rect = currentRegion?.let { regionToDisplayRect(it, latestViewport) }
+                        if (rect != null && rect.contains(offset)) {
+                            editMode = RegionEditMode.Move
+                            dragStart = null
+                            dragCurrent = null
+                            gestureStart = offset
+                            gestureBaseRegion = currentRegion
+                            gestureBaseImageOffset = null
+                        } else {
+                            editMode = RegionEditMode.None
+                            dragStart = null
+                            dragCurrent = null
+                            gestureStart = null
+                            gestureBaseRegion = null
+                            gestureBaseImageOffset = null
+                        }
+                    },
+                    onDrag = { change, _ ->
+                        if (editMode != RegionEditMode.Move) {
+                            return@detectDragGesturesAfterLongPress
+                        }
+                        val start = gestureStart ?: return@detectDragGesturesAfterLongPress
+                        val base = gestureBaseRegion ?: return@detectDragGesturesAfterLongPress
+                        val delta = displayDeltaToBitmap(
+                            delta = change.position - start,
+                            viewport = latestViewport
+                        )
+                        onRegionChange(activeItem.key, moveRegion(base, delta.first, delta.second, bitmap))
+                        change.consume()
+                    },
+                    onDragEnd = {
+                        editMode = RegionEditMode.None
+                        dragStart = null
+                        dragCurrent = null
+                        gestureStart = null
+                        gestureBaseRegion = null
+                        gestureBaseImageOffset = null
+                    },
+                    onDragCancel = {
+                        editMode = RegionEditMode.None
+                        dragStart = null
+                        dragCurrent = null
+                        gestureStart = null
+                        gestureBaseRegion = null
+                        gestureBaseImageOffset = null
+                    }
+                )
+            }
+            .pointerInput(selectedItem?.key, canvasSize, bitmap) {
                 val activeItem = selectedItem ?: return@pointerInput
                 val edgeSlop = 40.dp.toPx()
                 val deleteVisualSize = 32.dp.toPx()
@@ -973,7 +1102,7 @@ private fun FullScreenRegionCanvas(
                     onDragStart = { rawOffset ->
                         val offset = clampOffset(rawOffset, canvasSize)
                         val currentRegion = latestSelectedRegion
-                        val rect = currentRegion?.let { regionToDisplayRect(it, canvasSize, bitmap) }
+                        val rect = currentRegion?.let { regionToDisplayRect(it, latestViewport) }
                         if (
                             rect != null &&
                             deleteHandleHitRect(
@@ -984,26 +1113,36 @@ private fun FullScreenRegionCanvas(
                                 gapPx = deleteGap
                             ).contains(offset)
                         ) {
-                            onDeleteSelected(activeItem.key)
                             editMode = RegionEditMode.None
                             dragStart = null
                             dragCurrent = null
                             gestureStart = null
                             gestureBaseRegion = null
+                            gestureBaseImageOffset = null
                             return@detectDragGestures
                         }
                         if (rect == null) {
-                            editMode = RegionEditMode.Create
-                            dragStart = offset
-                            dragCurrent = offset
-                            gestureStart = null
+                            editMode = if (latestImageScale > MIN_IMAGE_SCALE) RegionEditMode.ImagePan else RegionEditMode.Create
+                            dragStart = if (editMode == RegionEditMode.Create) offset else null
+                            dragCurrent = if (editMode == RegionEditMode.Create) offset else null
+                            gestureStart = if (editMode == RegionEditMode.ImagePan) offset else null
                             gestureBaseRegion = null
+                            gestureBaseImageOffset = if (editMode == RegionEditMode.ImagePan) latestImageOffset else null
                         } else {
-                            editMode = regionEditModeForOffset(rect, offset, edgeSlop)
+                            val detectedMode = regionEditModeForOffset(rect, offset, edgeSlop)
+                            editMode = when {
+                                detectedMode == RegionEditMode.ResizeLeft ||
+                                    detectedMode == RegionEditMode.ResizeRight ||
+                                    detectedMode == RegionEditMode.ResizeTop ||
+                                    detectedMode == RegionEditMode.ResizeBottom -> detectedMode
+                                latestImageScale > MIN_IMAGE_SCALE -> RegionEditMode.ImagePan
+                                else -> RegionEditMode.None
+                            }
                             dragStart = null
                             dragCurrent = null
                             gestureStart = if (editMode == RegionEditMode.None) null else offset
-                            gestureBaseRegion = if (editMode == RegionEditMode.None) null else currentRegion
+                            gestureBaseRegion = if (editMode == RegionEditMode.ImagePan || editMode == RegionEditMode.None) null else currentRegion
+                            gestureBaseImageOffset = if (editMode == RegionEditMode.ImagePan) latestImageOffset else null
                         }
                     },
                     onDrag = { change, _ ->
@@ -1012,12 +1151,23 @@ private fun FullScreenRegionCanvas(
                             dragCurrent = clampOffset(change.position, canvasSize)
                             return@detectDragGestures
                         }
+                        if (mode == RegionEditMode.ImagePan) {
+                            val start = gestureStart ?: return@detectDragGestures
+                            val baseOffset = gestureBaseImageOffset ?: return@detectDragGestures
+                            imageOffset = clampImageOffset(
+                                offset = baseOffset + (change.position - start),
+                                canvasSize = canvasSize,
+                                bitmap = bitmap,
+                                scale = latestImageScale
+                            )
+                            change.consume()
+                            return@detectDragGestures
+                        }
                         val start = gestureStart ?: return@detectDragGestures
                         val base = gestureBaseRegion ?: return@detectDragGestures
                         val delta = displayDeltaToBitmap(
                             delta = change.position - start,
-                            canvasSize = canvasSize,
-                            bitmap = bitmap
+                            viewport = latestViewport
                         )
                         val next = when (mode) {
                             RegionEditMode.Move -> moveRegion(base, delta.first, delta.second, bitmap)
@@ -1037,7 +1187,7 @@ private fun FullScreenRegionCanvas(
                                 displayRectToRegion(
                                     start = start,
                                     end = end,
-                                    canvasSize = canvasSize,
+                                    viewport = latestViewport,
                                     bitmap = bitmap
                                 )?.let { onRegionChange(activeItem.key, it) }
                             }
@@ -1047,6 +1197,7 @@ private fun FullScreenRegionCanvas(
                         dragCurrent = null
                         gestureStart = null
                         gestureBaseRegion = null
+                        gestureBaseImageOffset = null
                     },
                     onDragCancel = {
                         editMode = RegionEditMode.None
@@ -1054,28 +1205,31 @@ private fun FullScreenRegionCanvas(
                         dragCurrent = null
                         gestureStart = null
                         gestureBaseRegion = null
+                        gestureBaseImageOffset = null
                     }
                 )
             }
     ) {
-        Image(
-            bitmap = bitmap.asImageBitmap(),
-            contentDescription = null,
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.FillBounds
-        )
         Canvas(modifier = Modifier.fillMaxSize()) {
+            drawImage(
+                image = imageBitmap,
+                dstOffset = IntOffset(imageOffset.x.roundToInt(), imageOffset.y.roundToInt()),
+                dstSize = IntSize(
+                    width = (bitmap.width * imageScale).roundToInt().coerceAtLeast(1),
+                    height = (bitmap.height * imageScale).roundToInt().coerceAtLeast(1)
+                )
+            )
             val itemByKey = items.associateBy { it.key }
             val selectedKey = selectedItem?.key
             regions.forEach { (key, region) ->
                 if (key == selectedKey) return@forEach
                 val item = itemByKey[key] ?: return@forEach
-                val rect = regionToDisplayRect(region, canvasSize, bitmap) ?: return@forEach
+                val rect = regionToDisplayRect(region, viewport) ?: return@forEach
                 drawAnnotationRect(rect, item)
             }
             if (selectedItem != null && selectedKey != null) {
                 val selectedRegionForDraw = regions[selectedKey]
-                val selectedRect = selectedRegionForDraw?.let { regionToDisplayRect(it, canvasSize, bitmap) }
+                val selectedRect = selectedRegionForDraw?.let { regionToDisplayRect(it, viewport) }
                 if (selectedRect != null) {
                     drawAnnotationRect(selectedRect, selectedItem)
                     drawSelectionHandles(selectedRect, selectedItem)
@@ -1113,11 +1267,19 @@ private fun FullScreenDialogEffect(
         val decorView = window?.decorView
         val previousVisibility = decorView?.systemUiVisibility
         val previousFlags = window?.attributes?.flags ?: 0
+        val previousStatusBarColor = window?.statusBarColor
+        val previousNavigationBarColor = window?.navigationBarColor
+        val previousCutoutMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            window?.attributes?.layoutInDisplayCutoutMode
+        } else {
+            null
+        }
         val hadFullscreenFlag = previousFlags and WindowManager.LayoutParams.FLAG_FULLSCREEN != 0
         val fullscreenFlags = immersiveFullscreenFlags()
         val fullscreenWindowFlags = WindowManager.LayoutParams.FLAG_FULLSCREEN or
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+            WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS
 
         window?.setFlags(
             WindowManager.LayoutParams.FLAG_FULLSCREEN,
@@ -1125,10 +1287,28 @@ private fun FullScreenDialogEffect(
         )
         decorView?.systemUiVisibility = fullscreenFlags
         window?.addFlags(fullscreenWindowFlags)
+        window?.statusBarColor = android.graphics.Color.TRANSPARENT
+        window?.navigationBarColor = android.graphics.Color.TRANSPARENT
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && window != null) {
+            val attrs = window.attributes
+            attrs.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            window.attributes = attrs
+        }
 
         onDispose {
             if (decorView != null && previousVisibility != null) {
                 decorView.systemUiVisibility = previousVisibility
+            }
+            if (previousStatusBarColor != null) {
+                window?.statusBarColor = previousStatusBarColor
+            }
+            if (previousNavigationBarColor != null) {
+                window?.navigationBarColor = previousNavigationBarColor
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && window != null && previousCutoutMode != null) {
+                val attrs = window.attributes
+                attrs.layoutInDisplayCutoutMode = previousCutoutMode
+                window.attributes = attrs
             }
             window?.clearFlags(fullscreenWindowFlags)
             if (!hadFullscreenFlag) {
@@ -1485,25 +1665,25 @@ private fun missingItems(
 private fun displayRectToRegion(
     start: Offset,
     end: Offset,
-    canvasSize: IntSize,
+    viewport: ImageViewport,
     bitmap: Bitmap
 ): CaptchaRegion? {
-    if (canvasSize.width <= 0 || canvasSize.height <= 0) {
+    if (viewport.scale <= 0f) {
         return null
     }
-    val left = min(start.x, end.x).coerceIn(0f, canvasSize.width.toFloat())
-    val top = min(start.y, end.y).coerceIn(0f, canvasSize.height.toFloat())
-    val right = max(start.x, end.x).coerceIn(0f, canvasSize.width.toFloat())
-    val bottom = max(start.y, end.y).coerceIn(0f, canvasSize.height.toFloat())
+    val startInBitmap = displayOffsetToBitmap(start, viewport, bitmap)
+    val endInBitmap = displayOffsetToBitmap(end, viewport, bitmap)
+    val left = min(startInBitmap.x, endInBitmap.x).coerceIn(0f, bitmap.width.toFloat())
+    val top = min(startInBitmap.y, endInBitmap.y).coerceIn(0f, bitmap.height.toFloat())
+    val right = max(startInBitmap.x, endInBitmap.x).coerceIn(0f, bitmap.width.toFloat())
+    val bottom = max(startInBitmap.y, endInBitmap.y).coerceIn(0f, bitmap.height.toFloat())
     if (right - left < 2f || bottom - top < 2f) {
         return null
     }
-    val scaleX = bitmap.width.toFloat() / canvasSize.width.toFloat()
-    val scaleY = bitmap.height.toFloat() / canvasSize.height.toFloat()
-    val x = (left * scaleX).roundToInt().coerceIn(0, bitmap.width - 1)
-    val y = (top * scaleY).roundToInt().coerceIn(0, bitmap.height - 1)
-    val w = ((right - left) * scaleX).roundToInt().coerceAtLeast(1)
-    val h = ((bottom - top) * scaleY).roundToInt().coerceAtLeast(1)
+    val x = left.roundToInt().coerceIn(0, bitmap.width - 1)
+    val y = top.roundToInt().coerceIn(0, bitmap.height - 1)
+    val w = (right - left).roundToInt().coerceAtLeast(1)
+    val h = (bottom - top).roundToInt().coerceAtLeast(1)
     return CaptchaRegion(
         x = x,
         y = y,
@@ -1514,20 +1694,78 @@ private fun displayRectToRegion(
 
 private fun regionToDisplayRect(
     region: CaptchaRegion,
-    canvasSize: IntSize,
-    bitmap: Bitmap
+    viewport: ImageViewport
 ): Rect? {
-    if (canvasSize.width <= 0 || canvasSize.height <= 0 || !region.isValid) {
+    if (viewport.scale <= 0f || !region.isValid) {
         return null
     }
-    val scaleX = canvasSize.width.toFloat() / bitmap.width.toFloat()
-    val scaleY = canvasSize.height.toFloat() / bitmap.height.toFloat()
     return Rect(
-        left = region.x * scaleX,
-        top = region.y * scaleY,
-        right = (region.x + region.w) * scaleX,
-        bottom = (region.y + region.h) * scaleY
+        left = viewport.offset.x + region.x * viewport.scale,
+        top = viewport.offset.y + region.y * viewport.scale,
+        right = viewport.offset.x + (region.x + region.w) * viewport.scale,
+        bottom = viewport.offset.y + (region.y + region.h) * viewport.scale
     )
+}
+
+private fun displayOffsetToBitmap(
+    offset: Offset,
+    viewport: ImageViewport,
+    bitmap: Bitmap
+): Offset {
+    return Offset(
+        x = ((offset.x - viewport.offset.x) / viewport.scale).coerceIn(0f, bitmap.width.toFloat()),
+        y = ((offset.y - viewport.offset.y) / viewport.scale).coerceIn(0f, bitmap.height.toFloat())
+    )
+}
+
+private fun clampImageOffset(
+    offset: Offset,
+    canvasSize: IntSize,
+    bitmap: Bitmap,
+    scale: Float
+): Offset {
+    if (canvasSize.width <= 0 || canvasSize.height <= 0) {
+        return Offset.Zero
+    }
+    val imageWidth = bitmap.width * scale
+    val imageHeight = bitmap.height * scale
+    val x = if (imageWidth <= canvasSize.width) {
+        (canvasSize.width - imageWidth) / 2f
+    } else {
+        offset.x.coerceIn(canvasSize.width - imageWidth, 0f)
+    }
+    val y = if (imageHeight <= canvasSize.height) {
+        (canvasSize.height - imageHeight) / 2f
+    } else {
+        offset.y.coerceIn(canvasSize.height - imageHeight, 0f)
+    }
+    return Offset(x, y)
+}
+
+private fun centroidOf(points: List<Offset>): Offset {
+    if (points.isEmpty()) {
+        return Offset.Zero
+    }
+    var x = 0f
+    var y = 0f
+    points.forEach {
+        x += it.x
+        y += it.y
+    }
+    return Offset(x / points.size, y / points.size)
+}
+
+private fun averageDistance(points: List<Offset>, centroid: Offset): Float {
+    if (points.isEmpty()) {
+        return 0f
+    }
+    var total = 0f
+    points.forEach {
+        val dx = it.x - centroid.x
+        val dy = it.y - centroid.y
+        total += sqrt(dx * dx + dy * dy)
+    }
+    return total / points.size
 }
 
 private fun defaultRegionForItem(key: String, bitmap: Bitmap): CaptchaRegion {
@@ -1750,15 +1988,14 @@ private fun regionEditModeForOffset(
 
 private fun displayDeltaToBitmap(
     delta: Offset,
-    canvasSize: IntSize,
-    bitmap: Bitmap
+    viewport: ImageViewport
 ): Pair<Int, Int> {
-    if (canvasSize.width <= 0 || canvasSize.height <= 0) {
+    if (viewport.scale <= 0f) {
         return 0 to 0
     }
     return Pair(
-        (delta.x * bitmap.width / canvasSize.width).roundToInt(),
-        (delta.y * bitmap.height / canvasSize.height).roundToInt()
+        (delta.x / viewport.scale).roundToInt(),
+        (delta.y / viewport.scale).roundToInt()
     )
 }
 

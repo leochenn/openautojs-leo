@@ -51,14 +51,17 @@ var CONFIG = {
         prefocusInputBeforeMathOcr: true,
         inputPoint: { x: 720, y: 1908 },
         // 自定义数字输入法通道：抢票前需要启用并切换到 OpenAutoJS 内置的验证码数字输入法。
-        // 流程：点击验证码输入框 -> 等待 focusWaitMs -> 广播答案给 IME -> 等待 commitWaitMs -> 收起键盘 -> 点击确定。
+        // 流程：点击验证码输入框 -> 等待 focusWaitMs -> 广播答案给 IME -> 等待 IME commit 回执；无回执时用 commitWaitMs 兜底。
         inputMethod: {
             enabled: true, // true 使用自定义 IME；false 则跳过 IME，进入人工兜底
             packageName: "", // 留空时使用当前 OpenAutoJS 包名；不要填 Mock App 或微信包名
             action: "org.openautojs.autojs.action.CAPTCHA_IME_SET_ANSWER", // OpenAutoJS 验证码输入法接收答案的广播 action
             extraAnswer: "answer", // 广播中携带验证码答案的 extra key
+            extraRequestId: "requestId", // 广播中携带本次验证码输入请求 id，用于等待 IME commit 回执
             focusWaitMs: 200, // 点击验证码输入框后等待焦点/输入连接建立；偶发不输入可调到 400-600
-            afterBroadcastMs: 30, // 发送广播后给 receiver 一个极短处理窗口，一般无需调整
+            afterBroadcastMs: 50, // 发送广播后给 receiver 一个极短处理窗口，一般无需调整
+            commitAckTimeoutMs: 500, // 等待 IME commitText 回执的最长时间；收到回执会立即继续
+            commitAckPollMs: 20, // 轮询 IME commit 回执的间隔
             commitWaitMs: 50, // 等待 IME commitText 完成；已验证 350ms 可完成，正式偶发不输入可调到 800-1200
         },
         submitPoint: { x: 720, y: 2216 },
@@ -78,8 +81,8 @@ var CONFIG = {
             arrowProbeRegion: { x: 210, y: 1765, w: 150, h: 110 },
             handleStartPoint: { x: 263, y: 1818 },
             submitPoint: { x: 720, y: 2148 },
-            dragDuration: 420,
-            afterDragMs: 120,
+            dragDuration: 200,
+            afterDragMs: 150,
             trackMinRatio: 0.12,
             arrowMinRatio: 0.08,
             arrowStrongMinRatio: 0.08,

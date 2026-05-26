@@ -14,8 +14,13 @@ public class CaptchaAnswerReceiver extends BroadcastReceiver {
         if (intent == null || !CaptchaImeBridge.ACTION_SET_ANSWER.equals(intent.getAction())) {
             return;
         }
-        CaptchaImeBridge.saveAnswer(context, intent.getStringExtra(CaptchaImeBridge.EXTRA_ANSWER));
-        Log.i(TAG, "received captcha answer");
+        String requestId = intent.getStringExtra(CaptchaImeBridge.EXTRA_REQUEST_ID);
+        CaptchaImeBridge.saveAnswer(
+                context,
+                intent.getStringExtra(CaptchaImeBridge.EXTRA_ANSWER),
+                requestId
+        );
+        Log.i(TAG, "received captcha answer requestId=" + requestId);
         CaptchaNumberInputMethodService.commitPendingAnswerIfActive();
     }
 }

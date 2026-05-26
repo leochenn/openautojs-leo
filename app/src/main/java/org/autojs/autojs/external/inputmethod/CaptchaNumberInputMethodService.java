@@ -14,10 +14,18 @@ import org.openautojs.autojs.R;
 public class CaptchaNumberInputMethodService extends InputMethodService {
 
     private static final String TAG = "CaptchaInputMethod";
+    private static final long COMMIT_DELAY_MS = 60L;
+    private static final long RETRY_DELAY_MS = 120L;
     private static CaptchaNumberInputMethodService activeService;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private final Runnable commitRunnable = () -> commitPendingAnswer("delayed");
+    private final Runnable retryCommitRunnable = () -> commitPendingAnswer("retry_120");
+    private final Runnable commitRunnable = () -> {
+        boolean committed = commitPendingAnswer("delayed_60");
+        if (!committed && CaptchaImeBridge.getFreshAnswer(this).length() > 0) {
+            handler.postDelayed(retryCommitRunnable, RETRY_DELAY_MS);
+        }
+    };
 
     static void commitPendingAnswerIfActive() {
         CaptchaNumberInputMethodService service = activeService;
@@ -38,6 +46,7 @@ public class CaptchaNumberInputMethodService extends InputMethodService {
             activeService = null;
         }
         handler.removeCallbacks(commitRunnable);
+        handler.removeCallbacks(retryCommitRunnable);
         super.onDestroy();
     }
 
@@ -84,11 +93,11 @@ public class CaptchaNumberInputMethodService extends InputMethodService {
 
     private void scheduleCommitAttempts() {
         handler.removeCallbacks(commitRunnable);
-        commitPendingAnswer("immediate");
-        handler.postDelayed(commitRunnable, 120L);
-        handler.postDelayed(commitRunnable, 300L);
-        handler.postDelayed(commitRunnable, 700L);
-        handler.postDelayed(commitRunnable, 1200L);
+        handler.removeCallbacks(retryCommitRunnable);
+        if (CaptchaImeBridge.getFreshAnswer(this).length() == 0) {
+            return;
+        }
+        handler.postDelayed(commitRunnable, COMMIT_DELAY_MS);
     }
 
     private void bindNumberKey(View root, int viewId, String number) {
@@ -97,6 +106,7 @@ public class CaptchaNumberInputMethodService extends InputMethodService {
 
     private void commitManualNumber(String number) {
         handler.removeCallbacks(commitRunnable);
+        handler.removeCallbacks(retryCommitRunnable);
         CaptchaImeBridge.clearAnswer(this);
         InputConnection connection = getCurrentInputConnection();
         if (connection == null) {
@@ -108,6 +118,7 @@ public class CaptchaNumberInputMethodService extends InputMethodService {
 
     private void deletePreviousCharacter() {
         handler.removeCallbacks(commitRunnable);
+        handler.removeCallbacks(retryCommitRunnable);
         CaptchaImeBridge.clearAnswer(this);
         InputConnection connection = getCurrentInputConnection();
         if (connection == null) {
@@ -127,6 +138,7 @@ public class CaptchaNumberInputMethodService extends InputMethodService {
 
     private void hideInputMethod() {
         handler.removeCallbacks(commitRunnable);
+        handler.removeCallbacks(retryCommitRunnable);
         CaptchaImeBridge.clearAnswer(this);
         requestHideSelf(0);
     }
@@ -141,9 +153,12 @@ public class CaptchaNumberInputMethodService extends InputMethodService {
             Log.i(TAG, "no input connection reason=" + reason);
             return false;
         }
+        String requestId = CaptchaImeBridge.getPendingRequestId(this);
         boolean committed = connection.commitText(answer, 1);
-        Log.i(TAG, "commit answer result=" + committed + " reason=" + reason);
+        Log.i(TAG, "commit answer result=" + committed + " reason=" + reason +
+                " requestId=" + requestId);
         if (committed) {
+            CaptchaImeBridge.markCommitted(this, reason);
             CaptchaImeBridge.clearAnswer(this);
         }
         return committed;

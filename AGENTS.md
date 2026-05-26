@@ -23,13 +23,7 @@
 本仓库是 Android Gradle 多模块项目。`app` 是主应用模块，`common` 放通用能力，`autojs` 和 `automator` 负责自动化运行时与无障碍操作，`inrt` 与 `apkbuilder` 负责运行时模板和 APK 打包，`paddleocr` 提供 OCR 支持。`LocalRepo` 保存本地依赖库。各模块遵循 Android 目录约定：生产代码在 `src/main`，JVM 单元测试在 `src/test`，设备测试在 `src/androidTest`。应用资源在 `res`、`res-i18n`，内置脚本和示例在 `app/src/main/assets`。
 
 ## 构建、测试与本地开发命令
-本仓库优先沿用 `run_app_rtn.bat` 的构建流程和本机环境配置。该脚本会设置 `JAVA_HOME`、`GRADLE_USER_HOME`、`ADB_PATH`、`ANDROID_SDK_ROOT`，并按 `ANDROID_SDK_ROOT` 自动生成 `local.properties`。只做构建验证时使用构建模式，不执行 ADB 安装和启动逻辑。
-
-```bat
-.\run_app_rtn.bat build
-```
-
-该命令会执行 `:app:assembleDebug` 并校验调试 APK，通常产物位于 `app/build/outputs/apk/common/debug`。`test` 可运行 JVM 测试；`connectedAndroidTest` 需要连接真机或模拟器。直接运行 `.\run_app_rtn.bat` 会进入完整本机调试流程，默认安装并启动应用。
+协作约定：Codex 不主动执行 Gradle/App 编译验证命令（包括 `run_app_rtn.bat build`、`gradlew`、`:app:assembleDebug` 等），也不使用或读取 `GRADLE_USER_HOME`、Gradle wrapper 分发目录、Gradle 缓存目录（例如 `F:\software\Android-New-Gradle-Cache\.gradle\caches`）或其他 Gradle 相关配置来做验证。涉及需要编译或 Gradle 环境验证的改动时，由 Codex 在回复中提示用户执行相应命令，由用户本机运行并反馈结果。
 
 脚本运行和调试通常依赖真机环境、无障碍服务、截图权限、微信小程序页面状态，以及 `/sdcard/OpenAutoJS_NanjingBooking` 下的日志、缓存和诊断截图。只改 JS 脚本时不一定需要重新打包 APK，但涉及内置资产发布、主页 UI、输入法、权限或 Android 运行时改动时，应执行构建验证。
 

@@ -1125,6 +1125,57 @@ function createNanjingBookingCaptchaSolver(deps) {
         }
     }
 
+    function makeCaptchaImeRequestId() {
+        return "captcha_" + Date.now() + "_" + Math.floor(Math.random() * 1000000);
+    }
+
+    function readCaptchaImeCommitAck(requestId) {
+        try {
+            var prefs = context.getSharedPreferences(
+                "captcha_number_input_method",
+                android.content.Context.MODE_PRIVATE
+            );
+            var committedId = String(prefs.getString("committed_request_id", "") || "");
+            if (committedId !== requestId) {
+                return { ok: false };
+            }
+            return {
+                ok: true,
+                committedAt: Number(prefs.getLong("committed_timestamp", 0)),
+                reason: String(prefs.getString("committed_reason", "") || "")
+            };
+        } catch (e) {
+            return { ok: false, error: String(e) };
+        }
+    }
+
+    function waitCaptchaImeCommitAck(requestId, cfg) {
+        var timeoutMs = Math.max(0, Number(cfg.commitAckTimeoutMs || 0));
+        if (!requestId || timeoutMs <= 0) {
+            return { ok: false, skipped: true, reason: "commit_ack_disabled" };
+        }
+        var pollMs = Math.max(10, Number(cfg.commitAckPollMs || 20));
+        var start = Date.now();
+        var deadline = start + timeoutMs;
+        var last = null;
+        while (Date.now() <= deadline) {
+            last = readCaptchaImeCommitAck(requestId);
+            if (last.ok) {
+                var cost = Date.now() - start;
+                logx("Captcha IME commit ack received requestId=" + requestId +
+                    " reason=" + last.reason + " wait=" + cost + "ms");
+                last.waitMs = cost;
+                return last;
+            }
+            sleep(pollMs);
+        }
+        var total = Date.now() - start;
+        logx("Captcha IME commit ack timeout requestId=" + requestId +
+            " timeout=" + timeoutMs + "ms wait=" + total + "ms" +
+            (last && last.error ? " error=" + last.error : ""));
+        return { ok: false, timeout: true, waitMs: total };
+    }
+
     function sendCaptchaAnswerToInputMethod(answer) {
         var cfg = CONFIG.captcha.inputMethod || {};
         if (!cfg.enabled) {
@@ -1133,18 +1184,36 @@ function createNanjingBookingCaptchaSolver(deps) {
         try {
             var action = String(cfg.action || "org.openautojs.autojs.action.CAPTCHA_IME_SET_ANSWER");
             var targetPackage = String(cfg.packageName || context.getPackageName());
+            var requestId = makeCaptchaImeRequestId();
             var intent = new android.content.Intent(action);
             if (targetPackage) {
                 intent.setPackage(targetPackage);
             }
             intent.putExtra(String(cfg.extraAnswer || "answer"), String(answer));
+            intent.putExtra(String(cfg.extraRequestId || "requestId"), requestId);
             context.sendBroadcast(intent);
             logx("Captcha IME answer broadcast sent answer=" + answer +
-                " package=" + targetPackage + " action=" + action);
+                " package=" + targetPackage + " action=" + action +
+                " requestId=" + requestId);
+            if (cfg.commitAckTimeoutMs > 0) {
+                var ack = waitCaptchaImeCommitAck(requestId, cfg);
+                if (ack.ok) {
+                    return { ok: true, requestId: requestId, ack: ack };
+                }
+                if (cfg.afterBroadcastMs > 0) {
+                    sleep(cfg.afterBroadcastMs);
+                }
+                return {
+                    ok: true,
+                    requestId: requestId,
+                    ackTimeout: true,
+                    reason: "captcha_ime_commit_ack_timeout"
+                };
+            }
             if (cfg.afterBroadcastMs > 0) {
                 sleep(cfg.afterBroadcastMs);
             }
-            return { ok: true };
+            return { ok: true, requestId: requestId };
         } catch (e) {
             logx("Captcha IME answer broadcast failed err=" + e);
             return { ok: false, reason: "captcha_ime_broadcast_failed err=" + e };
@@ -1171,10 +1240,6 @@ function createNanjingBookingCaptchaSolver(deps) {
         if (!CONFIG.captcha.autoSubmitAfterInput) {
             return { ok: true, submitted: false, detail: detail };
         }
-        try {
-            back();
-            sleep(CONFIG.captcha.afterKeyboardBackMs);
-        } catch (ignored) {}
         if (shouldSkipFinalSubmit()) {
             notifyFinalSubmitSkipped("math", detail);
             return { ok: true, submitted: false, finalSubmitSkipped: true, detail: detail };
@@ -1252,7 +1317,6 @@ function createNanjingBookingCaptchaSolver(deps) {
             return { ok: false, manualFallback: true, reason: "captcha_ime_disabled" };
         }
         var imeResult = sendCaptchaAnswerToInputMethod(answer);
-        sleep(imeCfg.commitWaitMs || CONFIG.captcha.afterInputMs);
         if (!imeResult.ok) {
             clearMathCaptchaInputPrefocus();
             return {
@@ -1260,6 +1324,9 @@ function createNanjingBookingCaptchaSolver(deps) {
                 manualFallback: true,
                 reason: imeResult.reason || "captcha_ime_unavailable"
             };
+        }
+        if (!imeResult.ack || !imeResult.ack.ok) {
+            sleep(imeCfg.commitWaitMs || CONFIG.captcha.afterInputMs);
         }
         var result = finishCaptchaInput(answer, submitPoint, "captcha_ime");
         clearMathCaptchaInputPrefocus();
