@@ -116,8 +116,6 @@ var CONFIG = {
             pollutedFallbackMinNeutralRatio: 0.68,
             pollutedFallbackMaxDarkRatio: 0.22,
             pollutedFallbackMinCenterRatio: 0.25,
-            pollutedFallbackRequireNoGrayCandidate: true,
-            pollutedEdgeMinSideRatio: 0.75,
             fastImageMinColumnHits: 3,
             grayMin: 165,
             grayMax: 245,
@@ -126,14 +124,6 @@ var CONFIG = {
             minSide: 90,
             maxSide: 215,
             minColumnHits: 10,
-            grayColumnHitRatio: 0.10,
-            grayMinColumnHitsFloor: 6,
-            grayRunQuietSlots: 5,
-            sliderTargetMinMoveRatio: 0.12,
-            sliderFastCandidateMinScore: 60,
-            sliderFastCandidateWeakScore: 45,
-            sliderSmallLargeMaxRatio: 0.94,
-            sliderSmallMaxScoreGap: 25,
             minArea: 3000
         }
     }
@@ -310,6 +300,11 @@ function finalNotifyUser(msg) {
         logx("TOAST", "toastLog 失败 err=" + e);
     }
     sleep(CONFIG.finalToastHoldMs);
+}
+
+function vibrateManualFallback(reason) {
+    logx("ALERT", "人工兜底震动提醒 reason=" + (reason || ""));
+    try { device.vibrate(500); } catch (ignored) {}
 }
 
 function diagnosticPath(name, ext) {
@@ -668,6 +663,7 @@ function solveCaptchaAfterConfirmForRush() {
         var profileReason = "验证码校准配置不可用：" + profileResult.reason + "，请回到 App 重新校准";
         logx("CAPTCHA", profileReason);
         notifyUser(profileReason);
+        vibrateManualFallback(profileResult.reason);
         return { ok: false, manualFallback: true, reason: profileResult.reason };
     }
 
@@ -677,6 +673,7 @@ function solveCaptchaAfterConfirmForRush() {
         logx("CAPTCHA", missingReason);
         notifyUser(missingReason);
         captureDiagnostics("captcha_module_unavailable", CONFIG.diagnostics && CONFIG.diagnostics.ocrOnError);
+        vibrateManualFallback("captcha_module_unavailable");
         return { ok: false, manualFallback: true, reason: "captcha_module_unavailable" };
     }
 
@@ -685,6 +682,7 @@ function solveCaptchaAfterConfirmForRush() {
         var reason = result && result.reason ? result.reason : "unknown";
         logx("CAPTCHA", "验证码自动处理未完成，保留页面给人工兜底 reason=" + reason);
         notifyUser("验证码需人工兜底，请查看页面和日志");
+        vibrateManualFallback(reason);
         return result || { ok: false, manualFallback: true, reason: reason };
     }
     logx("CAPTCHA", "验证码自动处理完成 type=" + (result.type || "") + " detail=" + (result.detail || ""));
