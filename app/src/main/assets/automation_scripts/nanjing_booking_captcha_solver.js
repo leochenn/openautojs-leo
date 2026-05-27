@@ -1486,8 +1486,22 @@ function createNanjingBookingCaptchaSolver(deps) {
         }
         if (boxes.length === 1) {
             var only = boxes[0];
+            if (!source) {
+                var singleChoice = chooseSliderTargetBox(region, boxes);
+                if (!singleChoice.ok) {
+                    return {
+                        ok: false,
+                        reason: singleChoice.reason,
+                        region: region,
+                        boxes: boxes,
+                        detail: singleChoice.detail || ""
+                    };
+                }
+                only = singleChoice.target;
+            }
             var onlyDetail = "target=(" + Math.round(only.centerX) + "," + Math.round(only.centerY) + "," +
                 Math.round(only.w) + "x" + Math.round(only.h) + ")";
+            if (only.score !== undefined) onlyDetail += " score=" + Math.round(only.score);
             if (source) onlyDetail = "source=" + source + " " + onlyDetail;
             if (extraDetail) onlyDetail += " " + extraDetail;
             return {
@@ -1499,17 +1513,26 @@ function createNanjingBookingCaptchaSolver(deps) {
                 detail: onlyDetail
             };
         }
-        boxes.sort(function (a, b) { return b.w - a.w; });
-        var pair = boxes.slice(0, 2);
-        pair.sort(function (a, b) {
-            if (a.w !== b.w) return a.w - b.w;
-            return a.centerX - b.centerX;
-        });
-        var target = pair[0];
-        var detail = "small=(" + Math.round(target.centerX) + "," + Math.round(target.centerY) + "," +
-            Math.round(target.w) + "x" + Math.round(target.h) + ") large=(" +
-            Math.round(pair[1].centerX) + "," + Math.round(pair[1].centerY) + "," +
-            Math.round(pair[1].w) + "x" + Math.round(pair[1].h) + ")";
+        var choice = chooseSliderTargetBox(region, boxes);
+        if (!choice.ok) {
+            return {
+                ok: false,
+                reason: choice.reason,
+                region: region,
+                boxes: boxes,
+                detail: choice.detail || ""
+            };
+        }
+        var pair = choice.boxes;
+        var target = choice.target;
+        var detail = "target=(" + Math.round(target.centerX) + "," + Math.round(target.centerY) + "," +
+            Math.round(target.w) + "x" + Math.round(target.h) + ") score=" + Math.round(target.score || 0);
+        if (pair.length > 1) {
+            detail += " ref=(" + Math.round(pair[1].centerX) + "," + Math.round(pair[1].centerY) + "," +
+                Math.round(pair[1].w) + "x" + Math.round(pair[1].h) + ") refScore=" +
+                Math.round(pair[1].score || 0);
+        }
+        if (choice.detail) detail += " " + choice.detail;
         if (source) detail = "source=" + source + " " + detail;
         if (extraDetail) detail += " " + extraDetail;
         return {
@@ -1519,6 +1542,99 @@ function createNanjingBookingCaptchaSolver(deps) {
             boxes: pair,
             fallback: source || "",
             detail: detail
+        };
+    }
+
+    function sliderHandleCenterX(region) {
+        var sliderProfile = activeSliderProfile();
+        if (sliderProfile && sliderProfile.handleRegion) {
+            var handleRegion = normalizeProfileRegion(sliderProfile.handleRegion, "profileSliderHandle", true);
+            return handleRegion.x + handleRegion.w / 2;
+        }
+        var cfg = CONFIG.captcha.slider;
+        if (cfg.handleStartPoint && cfg.handleStartPoint.x !== undefined) {
+            return scaleX(cfg.handleStartPoint.x);
+        }
+        return region.x;
+    }
+
+    function scoreSliderBox(region, box) {
+        var cfg = CONFIG.captcha.slider;
+        var minSide = scaleX(cfg.minSide || 90);
+        var maxSide = scaleX(cfg.maxSide || 215);
+        var expectedSide = (minSide + maxSide) / 2;
+        var sideTolerance = Math.max(1, (maxSide - minSide) / 2);
+        var sideScore = Math.max(0, 30 - Math.abs((box.w || 0) - expectedSide) / sideTolerance * 30);
+        var handleX = sliderHandleCenterX(region);
+        var minMoveRatio = cfg.sliderTargetMinMoveRatio || 0.12;
+        var minTargetX = handleX + region.w * minMoveRatio;
+        var moveSpan = Math.max(1, region.w * 0.35);
+        var moveScore = Math.max(-50, Math.min(35, (box.centerX - minTargetX) / moveSpan * 35));
+        var strengthScore = 16;
+        if (box.avgColumnHits !== undefined && box.minColumnHits) {
+            strengthScore = Math.min(25, Math.max(0, box.avgColumnHits / box.minColumnHits * 15));
+        }
+        if (box.peakColumnHits !== undefined && box.minColumnHits) {
+            strengthScore += Math.min(8, Math.max(0, (box.peakColumnHits - box.minColumnHits) / 3));
+        }
+        var edgePenalty = 0;
+        if (box.centerX < region.x + region.w * 0.18) edgePenalty += 25;
+        if (box.centerX > region.x + region.w * 0.94) edgePenalty += 12;
+        if (box.w < minSide || box.w > maxSide) edgePenalty += 40;
+        var score = sideScore + moveScore + strengthScore - edgePenalty;
+        box.score = score;
+        box.minTargetX = minTargetX;
+        box.rejectReason = box.centerX < minTargetX ? "left_of_target_min" : "";
+        return box;
+    }
+
+    function chooseSliderTargetBox(region, boxes) {
+        var cfg = CONFIG.captcha.slider;
+        var weakScore = cfg.sliderFastCandidateWeakScore || 45;
+        var strongScore = cfg.sliderFastCandidateMinScore || 60;
+        var scored = [];
+        var details = [];
+        for (var i = 0; i < boxes.length; i++) {
+            var box = scoreSliderBox(region, boxes[i]);
+            scored.push(box);
+            details.push(Math.round(box.centerX) + ":" + Math.round(box.score));
+        }
+        scored.sort(function (a, b) {
+            if ((a.score || 0) !== (b.score || 0)) return (b.score || 0) - (a.score || 0);
+            return b.centerX - a.centerX;
+        });
+        var candidates = [];
+        for (var j = 0; j < scored.length; j++) {
+            var candidate = scored[j];
+            if (candidate.centerX >= candidate.minTargetX && (candidate.score || 0) >= weakScore) {
+                candidates.push(candidate);
+            }
+        }
+        if (!candidates.length) {
+            return {
+                ok: false,
+                reason: "slider_fast_no_right_candidate scores=" + details.join(","),
+                detail: "scores=" + details.join(",")
+            };
+        }
+        var target = candidates[0];
+        if (boxes.length === 1 && (target.score || 0) < strongScore) {
+            return {
+                ok: false,
+                reason: "slider_fast_single_candidate_weak score=" + Math.round(target.score || 0) +
+                    " min=" + strongScore,
+                detail: "scores=" + details.join(",")
+            };
+        }
+        var selected = [target];
+        for (var k = 0; k < scored.length && selected.length < 2; k++) {
+            if (scored[k] !== target) selected.push(scored[k]);
+        }
+        return {
+            ok: true,
+            target: target,
+            boxes: selected,
+            detail: "scores=" + details.join(",") + " minTargetX=" + Math.round(target.minTargetX)
         };
     }
 
@@ -1921,7 +2037,8 @@ function createNanjingBookingCaptchaSolver(deps) {
         var uiSliderOk = trackPresenceOk && handlePresenceOk;
         var imagePolluted = !!(imageProbe && imageProbe.ratio >= (cfg.pollutedImageMinRatio || 0.35) &&
             imageProbe.boxes.length < 2);
-        var typeOk = uiSliderOk || arrowStrongOk || (imageOk && (handlePresenceOk || trackPresenceOk)) || pairedWeakOk;
+        var imageWithUiOk = imageOk && handlePresenceOk && trackPresenceOk;
+        var typeOk = uiSliderOk || arrowStrongOk || pairedWeakOk || imageWithUiOk;
         return {
             ok: typeOk,
             typeOk: typeOk,
@@ -1937,6 +2054,7 @@ function createNanjingBookingCaptchaSolver(deps) {
             trackPresenceOk: trackPresenceOk,
             handlePresenceOk: handlePresenceOk,
             uiSliderOk: uiSliderOk,
+            imageWithUiOk: imageWithUiOk,
             imageOk: imageOk,
             imagePolluted: imagePolluted,
             imageRatio: imageProbe ? imageProbe.ratio : 0,
@@ -1992,6 +2110,13 @@ function createNanjingBookingCaptchaSolver(deps) {
         var pixelAt = makePixelReader(img);
         var yStart = Math.round(region.h * 0.34);
         var yEnd = Math.round(region.h * 0.9);
+        var columnSamples = Math.max(1, Math.floor((yEnd - yStart) / step));
+        var minColumnHits = cfg.minColumnHits || 10;
+        if (cfg.grayColumnHitRatio) {
+            minColumnHits = Math.min(minColumnHits, Math.round(columnSamples * cfg.grayColumnHitRatio));
+        }
+        minColumnHits = Math.max(cfg.grayMinColumnHitsFloor || 6, minColumnHits);
+        var maxQuietSlots = cfg.grayRunQuietSlots || Math.max(4, Math.min(7, Math.round(scaleX(30) / step)));
         var colCount = [];
         var x;
         var y;
@@ -2012,15 +2137,32 @@ function createNanjingBookingCaptchaSolver(deps) {
         var startSlot = 0;
         var quietSlots = 0;
         for (var slot = 0; slot <= colCount.length; slot++) {
-            var active = slot < colCount.length && colCount[slot] >= cfg.minColumnHits;
+            var active = slot < colCount.length && colCount[slot] >= minColumnHits;
             if (active && !inRun) {
                 inRun = true;
                 startSlot = slot;
                 quietSlots = 0;
             } else if (!active && inRun) {
                 quietSlots++;
-                if (quietSlots > 3 || slot === colCount.length) {
-                    runs.push({ x1: startSlot * step, x2: Math.min(region.w - 1, (slot - quietSlots + 1) * step) });
+                if (quietSlots > maxQuietSlots || slot === colCount.length) {
+                    var lastActiveSlot = Math.max(startSlot, slot - quietSlots);
+                    var hitSum = 0;
+                    var peakHits = 0;
+                    var activeSlots = 0;
+                    for (var hitSlot = startSlot; hitSlot <= lastActiveSlot; hitSlot++) {
+                        var hits = colCount[hitSlot] || 0;
+                        hitSum += hits;
+                        if (hits > peakHits) peakHits = hits;
+                        if (hits >= minColumnHits) activeSlots++;
+                    }
+                    runs.push({
+                        x1: startSlot * step,
+                        x2: Math.min(region.w - 1, (lastActiveSlot + 1) * step),
+                        hitSum: hitSum,
+                        peakHits: peakHits,
+                        activeSlots: activeSlots,
+                        slots: Math.max(1, lastActiveSlot - startSlot + 1)
+                    });
                     inRun = false;
                     quietSlots = 0;
                 }
@@ -2043,25 +2185,40 @@ function createNanjingBookingCaptchaSolver(deps) {
                 h: runW,
                 area: runW * runW,
                 centerX: region.x + run.x1 + runW / 2,
-                centerY: region.y + yStart + runW / 2
+                centerY: region.y + yStart + runW / 2,
+                avgColumnHits: run.hitSum / Math.max(1, run.slots || 1),
+                peakColumnHits: run.peakHits || 0,
+                activeSlots: run.activeSlots || 0,
+                minColumnHits: minColumnHits
             });
         }
 
+        var scanDetail = "runs=" + runs.length + " boxes=" + boxes.length +
+            " minHits=" + minColumnHits + " quietSlots=" + maxQuietSlots;
+        if (boxes.length >= 1) {
+            var fastResult = buildSliderResult(region, boxes, "", scanDetail);
+            if (fastResult.ok) return fastResult;
+            scanDetail += " fastReject=" + fastResult.reason;
+        }
+
         if (boxes.length < 2) {
-            if (shouldUsePollutedSliderFallback(typeProbe)) {
+            var allowPollutedFallback = shouldUsePollutedSliderFallback(typeProbe) &&
+                (!(cfg.pollutedFallbackRequireNoGrayCandidate) || boxes.length === 0);
+            if (allowPollutedFallback) {
                 var fallback = recognizeSliderByPollutedFallback(img, region, pixelAt);
                 if (fallback.ok) return fallback;
                 return {
                     ok: false,
                     reason: "slider_target_not_found gray_boxes=" + boxes.length +
-                        " runs=" + runs.length + " fallback=" + fallback.reason,
+                        " " + scanDetail + " fallback=" + fallback.reason,
                     region: region,
-                    boxes: boxes
+                    boxes: boxes,
+                    detail: scanDetail
                 };
             }
-            return { ok: false, reason: "slider_gray_boxes=" + boxes.length + " runs=" + runs.length, region: region, boxes: boxes };
+            return { ok: false, reason: "slider_gray_boxes=" + boxes.length + " " + scanDetail, region: region, boxes: boxes, detail: scanDetail };
         }
-        return buildSliderResult(region, boxes, "", "runs=" + runs.length);
+        return { ok: false, reason: "slider_fast_candidate_rejected " + scanDetail, region: region, boxes: boxes, detail: scanDetail };
     }
 
     function normalizeProfileRegion(region, name, templateEnabled) {
