@@ -82,7 +82,7 @@ var CONFIG = {
             arrowProbeRegion: { x: 210, y: 1765, w: 150, h: 110 },
             handleStartPoint: { x: 263, y: 1818 },
             submitPoint: { x: 720, y: 2148 },
-            dragDuration: 200,
+            dragDuration: 350,
             afterDragMs: 150,
             trackMinRatio: 0.12,
             arrowMinRatio: 0.08,
@@ -1847,8 +1847,10 @@ function rushFlow() {
         return { ok: false, manualFallback: true, reason: captchaResult.reason };
     }
     logx("FLOW", "第二轮正式抢票结束 totalCost=" + (Date.now() - rushStart) + "ms");
-    notifyUser("第二轮已完成确认后处理，请查看页面结果和日志");
+    sleep(1800); // 等滑块动画、弹窗校验和页面跳转停稳；此时抢票主流程已结束
     captureDiagnostics("rush_after_confirm", CONFIG.diagnostics && CONFIG.diagnostics.ocrAfterRush);
+    notifyUser("第二轮已完成确认后处理，请查看页面结果和日志");
+
     return { ok: true, captcha: captchaResult };
 }
 
