@@ -18,8 +18,12 @@ data class BookingConfig(
 object AutomationScripts {
     private const val ASSET_DIR = "automation_scripts"
     private const val CONFIG_FILE_NAME = "nanjing_booking_config.json"
+    private const val CAPTCHA_SIMULATION_REQUEST_FILE_NAME = "captcha_simulation_request.json"
+    private const val CAPTCHA_SIMULATION_DIR_NAME = "captcha_simulation"
     const val CAPTCHA_PROFILE_FILE_NAME = CaptchaCalibrationStore.PROFILE_FILE_NAME
     const val MAIN_SCRIPT_NAME = "nanjing_booking_auto.js"
+    const val CAPTCHA_SIMULATION_SCRIPT_NAME = "nanjing_booking_captcha_simulation_test.js"
+    const val CAPTCHA_SIMULATION_OUTPUT_DIR = "/sdcard/OpenAutoJS_NanjingBooking/captcha_simulation"
 
     val defaultConfig = BookingConfig()
 
@@ -40,6 +44,31 @@ object AutomationScripts {
     fun mainScriptFile(context: Context): File {
         ensureReady(context)
         return File(scriptsDir(context), MAIN_SCRIPT_NAME)
+    }
+
+    fun captchaSimulationScriptFile(context: Context): File {
+        ensureReady(context)
+        return File(scriptsDir(context), CAPTCHA_SIMULATION_SCRIPT_NAME)
+    }
+
+    fun captchaSimulationRequestFile(context: Context): File {
+        ensureReady(context)
+        return File(scriptsDir(context), CAPTCHA_SIMULATION_REQUEST_FILE_NAME)
+    }
+
+    fun captchaSimulationDir(context: Context): File {
+        ensureReady(context)
+        return File(scriptsDir(context), CAPTCHA_SIMULATION_DIR_NAME).apply {
+            mkdirs()
+        }
+    }
+
+    fun captchaSimulationImageFile(context: Context, requestId: String): File {
+        return File(captchaSimulationDir(context), "captcha_simulation_${requestId}.png")
+    }
+
+    fun captchaSimulationResultFile(context: Context, requestId: String): File {
+        return File(captchaSimulationDir(context), "captcha_simulation_result_${requestId}.json")
     }
 
     fun configFile(context: Context): File {

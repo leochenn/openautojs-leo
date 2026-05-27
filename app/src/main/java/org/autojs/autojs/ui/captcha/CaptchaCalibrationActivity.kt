@@ -3,8 +3,11 @@
 package org.autojs.autojs.ui.captcha
 
 import android.app.Activity
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Paint
@@ -26,6 +29,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,6 +39,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -80,6 +85,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -87,6 +93,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import com.stardust.autojs.execution.ScriptExecution
 import org.autojs.autojs.model.automation.AutomationScripts
 import org.autojs.autojs.model.automation.CaptchaCalibrationProfile
 import org.autojs.autojs.model.automation.CaptchaCalibrationStore
@@ -94,8 +101,14 @@ import org.autojs.autojs.model.automation.CaptchaMathProfile
 import org.autojs.autojs.model.automation.CaptchaRegion
 import org.autojs.autojs.model.automation.CaptchaScreenSize
 import org.autojs.autojs.model.automation.CaptchaSliderProfile
+import org.autojs.autojs.model.script.ScriptFile
+import org.autojs.autojs.model.script.Scripts
 import org.autojs.autojs.ui.compose.theme.AutoXJsTheme
+import org.json.JSONObject
 import org.openautojs.autojs.R
+import java.io.File
+import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.delay
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -121,6 +134,14 @@ private const val KEY_SLIDER_IMAGE_SEARCH = "sliderImageSearchRegion"
 private const val KEY_SLIDER_HANDLE = "sliderHandleRegion"
 private const val KEY_SLIDER_TRACK = "sliderTrackRegion"
 private const val KEY_SLIDER_SUBMIT = "sliderSubmitRegion"
+private const val STEP_TYPE_SELECTION = 0
+private const val STEP_IMAGE_PICK = 1
+private const val STEP_ANNOTATE = 2
+private const val STEP_SIMULATION_PREVIEW = 3
+private const val CAPTCHA_SIMULATION_OVERLAY_ACTION = "org.openautojs.autojs.action.CAPTCHA_SIMULATION_OVERLAY"
+private const val CAPTCHA_SIMULATION_OVERLAY_PREFS = "captcha_simulation_overlay"
+private const val OVERLAY_TYPE_MATH = "math"
+private const val OVERLAY_TYPE_SLIDER = "slider"
 
 private data class AnnotationItem(
     val key: String,
@@ -138,6 +159,21 @@ private data class CalibrationType(
 private data class CaptchaSourceImage(
     val bitmap: Bitmap,
     val displayName: String
+)
+
+private data class SimulationOverlayState(
+    val requestId: String,
+    val type: String,
+    val region: CaptchaRegion,
+    val startPoint: Offset? = null,
+    val targetPoint: Offset? = null,
+    val detail: String = ""
+)
+
+private data class SimulationRunState(
+    val requestId: String,
+    val resultFile: File,
+    val execution: ScriptExecution?
 )
 
 private data class ImageViewport(
@@ -226,16 +262,20 @@ private fun CaptchaCalibrationScreen(
         CaptchaCalibrationStore.currentScreenSize(context)
     }
 
-    var step by rememberSaveable { mutableStateOf(0) }
+    var step by rememberSaveable { mutableStateOf(STEP_TYPE_SELECTION) }
     var selectedTypeKey by rememberSaveable { mutableStateOf(TYPE_MATH) }
     val selectedType = calibrationTypeOf(selectedTypeKey)
     var mathRegions by remember { mutableStateOf(regionsFromMathProfile(profile?.mathProfile)) }
     var sliderRegions by remember { mutableStateOf(regionsFromSliderProfile(profile?.sliderProfile)) }
     var mathImage by remember { mutableStateOf<CaptchaSourceImage?>(null) }
     var sliderImage by remember { mutableStateOf<CaptchaSourceImage?>(null) }
+    var simulationImage by remember { mutableStateOf<CaptchaSourceImage?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
     var messageIsError by remember { mutableStateOf(false) }
     var dimensionError by remember { mutableStateOf<String?>(null) }
+    val simulationEnabled = remember(profile, refreshTick) {
+        profile != null && AutomationScripts.validateCaptchaProfile(context, profile) == null
+    }
 
     LaunchedEffect(profile) {
         mathRegions = regionsFromMathProfile(profile?.mathProfile)
@@ -266,7 +306,7 @@ private fun CaptchaCalibrationScreen(
                     }
                     message = "${selectedType.title}截图已选择"
                     messageIsError = false
-                    step = 2
+                    step = STEP_ANNOTATE
                 } else {
                     dimensionError = "截图尺寸 ${bitmap.width} x ${bitmap.height}，与当前屏幕 ${imgScreenSize.width} x ${imgScreenSize.height} 不一致。请使用本机当前屏幕截图。"
                 }
@@ -277,20 +317,45 @@ private fun CaptchaCalibrationScreen(
         }
     }
 
+    val simulationImagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            try {
+                val bitmap = decodeBitmap(context, uri)
+                val imgScreenSize = CaptchaCalibrationStore.currentScreenSize(context)
+                if (bitmap.width == imgScreenSize.width && bitmap.height == imgScreenSize.height) {
+                    simulationImage = CaptchaSourceImage(
+                        bitmap = bitmap,
+                        displayName = "${bitmap.width} x ${bitmap.height}"
+                    )
+                    message = "模拟测试截图已选择"
+                    messageIsError = false
+                    step = STEP_SIMULATION_PREVIEW
+                } else {
+                    dimensionError = "截图尺寸 ${bitmap.width} x ${bitmap.height}，与当前屏幕 ${imgScreenSize.width} x ${imgScreenSize.height} 不一致。请使用本机当前屏幕截图。"
+                }
+            } catch (e: Exception) {
+                message = "读取模拟截图失败：${e.message ?: "未知错误"}"
+                messageIsError = true
+            }
+        }
+    }
+
     val currentImage = if (selectedType.key == TYPE_MATH) mathImage else sliderImage
 
     Scaffold(
         containerColor = Color.White,
         topBar = {
-            if (step < 2) {
+            if (step < STEP_ANNOTATE) {
                 TopAppBar(
-                    title = { Text(text = if (step == 0) "验证码校准" else "选择截图") },
+                    title = { Text(text = if (step == STEP_TYPE_SELECTION) "验证码校准" else "选择截图") },
                     navigationIcon = {
                         TextButton(
-                            onClick = { if (step > 0) step-- else onBack() },
+                            onClick = { if (step > STEP_TYPE_SELECTION) step-- else onBack() },
                             colors = ButtonDefaults.textButtonColors(contentColor = AppPrimary)
                         ) {
-                            Text(text = if (step > 0) "返回" else "退出")
+                            Text(text = if (step > STEP_TYPE_SELECTION) "返回" else "退出")
                         }
                     },
                     colors = TopAppBarDefaults.smallTopAppBarColors(
@@ -303,26 +368,35 @@ private fun CaptchaCalibrationScreen(
         }
     ) { padding ->
         when (step) {
-            0 -> TypeSelectionStep(
+            STEP_TYPE_SELECTION -> TypeSelectionStep(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding),
                 profile = profile,
                 onSelectType = { key ->
                     selectedTypeKey = key
-                    step = 1
+                    step = STEP_IMAGE_PICK
+                },
+                simulationEnabled = simulationEnabled,
+                onStartSimulation = {
+                    if (simulationEnabled) {
+                        simulationImagePickerLauncher.launch("image/*")
+                    } else {
+                        message = "请先完成数学和滑块验证码校准"
+                        messageIsError = true
+                    }
                 }
             )
-            1 -> ImagePickStep(
+            STEP_IMAGE_PICK -> ImagePickStep(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding),
                 type = selectedType,
                 currentImage = currentImage,
                 onPickImage = { imagePickerLauncher.launch("image/*") },
-                onUseExisting = { step = 2 }
+                onUseExisting = { step = STEP_ANNOTATE }
             )
-            2 -> {
+            STEP_ANNOTATE -> {
                 val currentRegions = if (selectedType.key == TYPE_MATH) mathRegions else sliderRegions
                 FullScreenAnnotateStep(
                     sourceImage = currentImage,
@@ -330,7 +404,7 @@ private fun CaptchaCalibrationScreen(
                     regions = currentRegions,
                     message = message,
                     messageIsError = messageIsError,
-                    onBack = { step = 1 },
+                    onBack = { step = STEP_IMAGE_PICK },
                     onRegionChange = { key, region ->
                         if (selectedType.key == TYPE_MATH) {
                             mathRegions = mathRegions + (key to region)
@@ -359,11 +433,22 @@ private fun CaptchaCalibrationScreen(
                             messageIsError = false
                             toast(context, "验证码校准已保存")
                             onProfileSaved()
-                            step = 0
+                            step = STEP_TYPE_SELECTION
                         } else {
                             message = saveResult
                             messageIsError = true
                         }
+                    }
+                )
+            }
+            STEP_SIMULATION_PREVIEW -> {
+                CaptchaSimulationPreviewStep(
+                    sourceImage = simulationImage,
+                    profile = profile,
+                    message = message,
+                    messageIsError = messageIsError,
+                    onBack = {
+                        step = STEP_TYPE_SELECTION
                     }
                 )
             }
@@ -392,7 +477,9 @@ private fun CaptchaCalibrationScreen(
 private fun TypeSelectionStep(
     modifier: Modifier,
     profile: CaptchaCalibrationProfile?,
-    onSelectType: (String) -> Unit
+    onSelectType: (String) -> Unit,
+    simulationEnabled: Boolean,
+    onStartSimulation: () -> Unit
 ) {
     Column(
         modifier = modifier.padding(horizontal = 24.dp, vertical = 16.dp),
@@ -419,10 +506,25 @@ private fun TypeSelectionStep(
             onClick = { onSelectType(TYPE_SLIDER) }
         )
 
+        Button(
+            modifier = Modifier.fillMaxWidth(),
+            enabled = simulationEnabled,
+            onClick = onStartSimulation,
+            shape = ButtonShape,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = AppPrimary,
+                contentColor = Color.White,
+                disabledContainerColor = AppDivider,
+                disabledContentColor = AppTextSecondary
+            )
+        ) {
+            Text(text = "模拟测试")
+        }
+
         Spacer(modifier = Modifier.weight(1f))
         Text(
             modifier = Modifier.fillMaxWidth(),
-            text = "点击卡片开始校准",
+            text = if (simulationEnabled) "点击卡片开始校准，或运行模拟测试" else "完成两类校准后可运行模拟测试",
             style = MaterialTheme.typography.bodySmall,
             color = AppTextSecondary,
             textAlign = TextAlign.Center
@@ -753,6 +855,372 @@ private fun FullScreenAnnotateStep(
                 }
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 模拟测试全屏预览
+// ---------------------------------------------------------------------------
+
+@Composable
+private fun CaptchaSimulationPreviewStep(
+    sourceImage: CaptchaSourceImage?,
+    profile: CaptchaCalibrationProfile?,
+    message: String?,
+    messageIsError: Boolean,
+    onBack: () -> Unit
+) {
+    val context = LocalContext.current
+    val view = LocalView.current
+    FullScreenDialogEffect(context = context, dialogView = view)
+
+    var runState by remember { mutableStateOf<SimulationRunState?>(null) }
+    val activeRunRef = remember { AtomicReference<SimulationRunState?>(null) }
+    var overlayState by remember { mutableStateOf<SimulationOverlayState?>(null) }
+    var previewCanvasSize by remember { mutableStateOf(IntSize.Zero) }
+    var statusText by remember { mutableStateOf(message ?: "选择截图后可运行模拟测试") }
+    var statusIsError by remember { mutableStateOf(messageIsError) }
+
+    DisposableEffect(Unit) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                if (intent.action != CAPTCHA_SIMULATION_OVERLAY_ACTION) return
+                val currentRun = activeRunRef.get() ?: return
+                val incomingRequestId = intent.getStringExtra("requestId") ?: return
+                if (incomingRequestId != currentRun.requestId) return
+                val type = intent.getStringExtra("type") ?: return
+                val region = CaptchaRegion.fromJson(parseJsonOrNull(intent.getStringExtra("regionJson"))) ?: return
+                val extra = parseJsonOrNull(intent.getStringExtra("extraJson"))
+                overlayState = SimulationOverlayState(
+                    requestId = incomingRequestId,
+                    type = type,
+                    region = region,
+                    startPoint = parsePoint(extra?.optJSONObject("startPoint")),
+                    targetPoint = parsePoint(extra?.optJSONObject("targetPoint")),
+                    detail = extra?.optString("sliderDetail", "") ?: ""
+                )
+            }
+        }
+        val filter = IntentFilter(CAPTCHA_SIMULATION_OVERLAY_ACTION)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("DEPRECATION")
+            context.registerReceiver(receiver, filter)
+        }
+        onDispose {
+            try {
+                context.unregisterReceiver(receiver)
+            } catch (ignored: Exception) {
+            }
+            activeRunRef.get()?.let { stopSimulationRun(context, it, cancelled = true) }
+            activeRunRef.set(null)
+            clearSimulationOverlayPrefs(context)
+        }
+    }
+
+    LaunchedEffect(overlayState) {
+        overlayState?.let {
+            delay(50)
+            writeOverlayReady(context, it)
+        }
+    }
+
+    LaunchedEffect(runState) {
+        val state = runState ?: return@LaunchedEffect
+        while (true) {
+            delay(300)
+            if (state.resultFile.exists()) {
+                val result = runCatching { JSONObject(state.resultFile.readText()) }.getOrNull()
+                if (result?.optString("requestId") == state.requestId) {
+                    val status = result.optString("status", "unknown")
+                    val type = result.optString("type", "")
+                    val reason = result.optString("reason", "")
+                    statusText = when (status) {
+                        "success" -> "模拟测试完成：${if (type.isNotBlank()) type else "unknown"}"
+                        "cancelled" -> "模拟测试已取消"
+                        else -> "模拟测试失败：${reason.ifBlank { "未知原因" }}"
+                    }
+                    statusIsError = status != "success" && status != "cancelled"
+                    activeRunRef.set(null)
+                    runState = null
+                    break
+                }
+            }
+        }
+    }
+
+    if (sourceImage == null || profile == null) {
+        Box(
+            modifier = Modifier.fillMaxSize().background(Color.Black),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("模拟测试缺少截图或校准配置", color = Color.White)
+        }
+        return
+    }
+    val previewImage = sourceImage
+    val activeProfile = profile
+
+    fun startSimulation() {
+        if (previewCanvasSize.width != previewImage.bitmap.width || previewCanvasSize.height != previewImage.bitmap.height) {
+            statusText = "预览区域尺寸 ${previewCanvasSize.width} x ${previewCanvasSize.height}，与截图 ${previewImage.bitmap.width} x ${previewImage.bitmap.height} 不一致，无法保证坐标一致"
+            statusIsError = true
+            return
+        }
+        val validationError = AutomationScripts.validateCaptchaProfile(context, activeProfile)
+        if (validationError != null) {
+            statusText = validationError
+            statusIsError = true
+            return
+        }
+        try {
+            clearSimulationOverlayPrefs(context)
+            overlayState = null
+            val requestId = "sim_${System.currentTimeMillis()}"
+            val imageFile = AutomationScripts.captchaSimulationImageFile(context, requestId)
+            imageFile.parentFile?.mkdirs()
+            imageFile.outputStream().use { output ->
+                previewImage.bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
+            }
+            val resultFile = AutomationScripts.captchaSimulationResultFile(context, requestId)
+            if (resultFile.exists()) {
+                resultFile.delete()
+            }
+            val requestFile = AutomationScripts.captchaSimulationRequestFile(context)
+            val requestJson = JSONObject()
+                .put("schemaVersion", 1)
+                .put("requestId", requestId)
+                .put("imagePath", imageFile.absolutePath)
+                .put("profile", activeProfile.toJson())
+                .put("resultPath", resultFile.absolutePath)
+                .put("outputDir", AutomationScripts.CAPTCHA_SIMULATION_OUTPUT_DIR)
+                .put("mode", "captcha_simulation")
+                .put("createdAt", CaptchaCalibrationProfile.nowIsoString())
+                .put("overlayTimeoutMs", 3000)
+            requestFile.writeText(requestJson.toString(2))
+
+            val pendingState = SimulationRunState(requestId, resultFile, null)
+            activeRunRef.set(pendingState)
+            runState = pendingState
+            statusText = "模拟测试启动中"
+            statusIsError = false
+
+            val script = AutomationScripts.captchaSimulationScriptFile(context)
+            val execution = Scripts.run(ScriptFile(script.path))
+            if (execution == null) {
+                activeRunRef.set(null)
+                runState = null
+                statusText = "模拟测试脚本启动失败"
+                statusIsError = true
+            } else {
+                val startedState = SimulationRunState(requestId, resultFile, execution)
+                activeRunRef.set(startedState)
+                runState = startedState
+                statusText = "模拟测试运行中"
+                statusIsError = false
+            }
+        } catch (e: Exception) {
+            activeRunRef.get()?.let { stopSimulationRun(context, it, cancelled = true) }
+            activeRunRef.set(null)
+            runState = null
+            statusText = "启动模拟测试失败：${e.message ?: "未知错误"}"
+            statusIsError = true
+        }
+    }
+
+    fun cancelSimulation() {
+        val state = activeRunRef.get() ?: runState ?: return
+        stopSimulationRun(context, state, cancelled = true)
+        activeRunRef.set(null)
+        runState = null
+        overlayState = null
+        statusText = "模拟测试已取消"
+        statusIsError = false
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+    ) {
+        SimulationImageCanvas(
+            modifier = Modifier.fillMaxSize(),
+            sourceImage = previewImage,
+            onCanvasSizeChange = { previewCanvasSize = it }
+        )
+
+        overlayState?.let { overlay ->
+            when (overlay.type) {
+                OVERLAY_TYPE_MATH -> SimulationMathInputOverlay(overlay)
+                OVERLAY_TYPE_SLIDER -> SimulationSliderOverlay(
+                    overlay = overlay,
+                    onDragFinished = { end, hit ->
+                        writeSliderDragResult(context, overlay, end, hit)
+                    }
+                )
+            }
+        }
+
+        Row(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            OutlinedButton(
+                modifier = Modifier.weight(1f),
+                enabled = runState == null,
+                onClick = onBack,
+                shape = ButtonShape,
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.65f)),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+            ) {
+                Text(text = "返回")
+            }
+            Button(
+                modifier = Modifier.weight(1f),
+                onClick = {
+                    if (runState == null) {
+                        startSimulation()
+                    } else {
+                        cancelSimulation()
+                    }
+                },
+                shape = ButtonShape,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (runState == null) AppPrimary else AppError,
+                    contentColor = Color.White
+                )
+            ) {
+                Text(text = if (runState == null) "运行" else "取消")
+            }
+        }
+
+        Surface(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth(),
+            color = Color.Black.copy(alpha = 0.72f)
+        ) {
+            Text(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                text = statusText,
+                color = if (statusIsError) AppError else Color.White,
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+    }
+}
+
+@Composable
+private fun SimulationImageCanvas(
+    modifier: Modifier,
+    sourceImage: CaptchaSourceImage,
+    onCanvasSizeChange: (IntSize) -> Unit
+) {
+    val bitmap = sourceImage.bitmap
+    val imageBitmap = remember(bitmap) { bitmap.asImageBitmap() }
+    Canvas(
+        modifier = modifier.onSizeChanged(onCanvasSizeChange)
+    ) {
+        drawImage(
+            image = imageBitmap,
+            dstOffset = IntOffset.Zero,
+            dstSize = IntSize(size.width.roundToInt(), size.height.roundToInt())
+        )
+    }
+}
+
+@Composable
+private fun SimulationMathInputOverlay(
+    overlay: SimulationOverlayState
+) {
+    val density = LocalDensity.current
+    var text by remember(overlay.requestId) { mutableStateOf("") }
+    BasicTextField(
+        modifier = Modifier
+            .offset { IntOffset(overlay.region.x, overlay.region.y) }
+            .width(with(density) { overlay.region.w.toDp() })
+            .height(with(density) { overlay.region.h.toDp() })
+            .background(Color.White.copy(alpha = 0.96f))
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        value = text,
+        onValueChange = { text = it },
+        singleLine = true,
+        textStyle = MaterialTheme.typography.bodyLarge.copy(color = AppTextPrimary)
+    )
+}
+
+@Composable
+private fun SimulationSliderOverlay(
+    overlay: SimulationOverlayState,
+    onDragFinished: (Offset, Boolean) -> Unit
+) {
+    val density = LocalDensity.current
+    val target = overlay.targetPoint
+    var topLeft by remember(overlay.requestId) {
+        mutableStateOf(Offset(overlay.region.x.toFloat(), overlay.region.y.toFloat()))
+    }
+    val handleWidth = with(density) { overlay.region.w.toDp() }
+    val handleHeight = with(density) { overlay.region.h.toDp() }
+    val center = Offset(
+        x = topLeft.x + overlay.region.w / 2f,
+        y = topLeft.y + overlay.region.h / 2f
+    )
+
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        if (target != null) {
+            drawLine(
+                color = AppPrimary.copy(alpha = 0.8f),
+                start = center,
+                end = target,
+                strokeWidth = 5f
+            )
+            drawCircle(
+                color = AppPrimary.copy(alpha = 0.28f),
+                radius = 34f,
+                center = target
+            )
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .offset { IntOffset(topLeft.x.roundToInt(), topLeft.y.roundToInt()) }
+            .width(handleWidth)
+            .height(handleHeight)
+            .background(AppPrimary.copy(alpha = 0.92f))
+            .pointerInput(overlay.requestId) {
+                detectDragGestures(
+                    onDragEnd = {
+                        val end = Offset(
+                            x = topLeft.x + overlay.region.w / 2f,
+                            y = topLeft.y + overlay.region.h / 2f
+                        )
+                        val hit = target?.let {
+                            kotlin.math.abs(end.x - it.x) <= max(48f, overlay.region.w * 0.5f) &&
+                                kotlin.math.abs(end.y - it.y) <= max(48f, overlay.region.h * 0.75f)
+                        } ?: false
+                        onDragFinished(end, hit)
+                    }
+                ) { change, dragAmount ->
+                    change.consume()
+                    topLeft = Offset(
+                        x = topLeft.x + dragAmount.x,
+                        y = topLeft.y + dragAmount.y
+                    )
+                }
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = "滑",
+            color = Color.White,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold
+        )
     }
 }
 
@@ -1182,6 +1650,7 @@ private fun FullScreenDialogEffect(
         val decorView = window?.decorView
         val previousVisibility = decorView?.systemUiVisibility
         val previousFlags = window?.attributes?.flags ?: 0
+        val previousSoftInputMode = window?.attributes?.softInputMode
         val previousStatusBarColor = window?.statusBarColor
         val previousNavigationBarColor = window?.navigationBarColor
         val previousCutoutMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -1202,6 +1671,7 @@ private fun FullScreenDialogEffect(
         )
         decorView?.systemUiVisibility = fullscreenFlags
         window?.addFlags(fullscreenWindowFlags)
+        window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
         window?.statusBarColor = android.graphics.Color.TRANSPARENT
         window?.navigationBarColor = android.graphics.Color.TRANSPARENT
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && window != null) {
@@ -1226,6 +1696,9 @@ private fun FullScreenDialogEffect(
                 window.attributes = attrs
             }
             window?.clearFlags(fullscreenWindowFlags)
+            if (window != null && previousSoftInputMode != null) {
+                window.setSoftInputMode(previousSoftInputMode)
+            }
             if (!hadFullscreenFlag) {
                 window?.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
             }
@@ -1401,6 +1874,112 @@ private fun saveCurrentProfile(
 // ---------------------------------------------------------------------------
 // 工具函数
 // ---------------------------------------------------------------------------
+
+private fun stopSimulationRun(
+    context: Context,
+    state: SimulationRunState,
+    cancelled: Boolean
+) {
+    try {
+        state.execution?.engine?.forceStop()
+    } catch (ignored: Exception) {
+    }
+    if (cancelled && !state.resultFile.exists()) {
+        writeSimulationResult(
+            file = state.resultFile,
+            requestId = state.requestId,
+            status = "cancelled",
+            reason = "user_cancelled"
+        )
+    }
+    clearSimulationOverlayPrefs(context)
+}
+
+private fun writeSimulationResult(
+    file: File,
+    requestId: String,
+    status: String,
+    reason: String
+) {
+    runCatching {
+        file.parentFile?.mkdirs()
+        val json = JSONObject()
+            .put("schemaVersion", 1)
+            .put("requestId", requestId)
+            .put("status", status)
+            .put("type", "")
+            .put("stage", status)
+            .put("reason", reason)
+            .put("stats", JSONObject.NULL)
+        file.writeText(json.toString(2))
+    }
+}
+
+private fun simulationOverlayPrefs(context: Context) =
+    context.applicationContext.getSharedPreferences(CAPTCHA_SIMULATION_OVERLAY_PREFS, Context.MODE_PRIVATE)
+
+private fun clearSimulationOverlayPrefs(context: Context) {
+    simulationOverlayPrefs(context).edit()
+        .remove("overlay_ready_request_id")
+        .remove("overlay_ready_timestamp")
+        .remove("overlay_ready_type")
+        .remove("overlay_ready_reason")
+        .remove("slider_drag_request_id")
+        .remove("slider_drag_end_x")
+        .remove("slider_drag_end_y")
+        .remove("slider_drag_target_x")
+        .remove("slider_drag_target_y")
+        .remove("slider_drag_hit")
+        .remove("slider_drag_timestamp")
+        .apply()
+}
+
+private fun writeOverlayReady(
+    context: Context,
+    overlay: SimulationOverlayState
+) {
+    simulationOverlayPrefs(context).edit()
+        .putString("overlay_ready_request_id", overlay.requestId)
+        .putLong("overlay_ready_timestamp", System.currentTimeMillis())
+        .putString("overlay_ready_type", overlay.type)
+        .putString("overlay_ready_reason", "layout_ready")
+        .apply()
+}
+
+private fun writeSliderDragResult(
+    context: Context,
+    overlay: SimulationOverlayState,
+    end: Offset,
+    hit: Boolean
+) {
+    val target = overlay.targetPoint
+    simulationOverlayPrefs(context).edit()
+        .putString("slider_drag_request_id", overlay.requestId)
+        .putInt("slider_drag_end_x", end.x.roundToInt())
+        .putInt("slider_drag_end_y", end.y.roundToInt())
+        .putInt("slider_drag_target_x", target?.x?.roundToInt() ?: -1)
+        .putInt("slider_drag_target_y", target?.y?.roundToInt() ?: -1)
+        .putBoolean("slider_drag_hit", hit)
+        .putLong("slider_drag_timestamp", System.currentTimeMillis())
+        .apply()
+}
+
+private fun parseJsonOrNull(value: String?): JSONObject? {
+    if (value.isNullOrBlank()) {
+        return null
+    }
+    return runCatching { JSONObject(value) }.getOrNull()
+}
+
+private fun parsePoint(json: JSONObject?): Offset? {
+    if (json == null) {
+        return null
+    }
+    return Offset(
+        x = json.optDouble("x", Double.NaN).toFloat(),
+        y = json.optDouble("y", Double.NaN).toFloat()
+    ).takeIf { !it.x.isNaN() && !it.y.isNaN() }
+}
 
 private fun decodeBitmap(context: Context, uri: Uri): Bitmap {
     val options = BitmapFactory.Options().apply {

@@ -2150,12 +2150,27 @@ function createNanjingBookingCaptchaSolver(deps) {
     }
 
     function solveAfterConfirm() {
+        return solveCaptchaCore(null, {}, {
+            skipInitialWait: false,
+            recycleImage: true,
+            formalMode: true
+        });
+    }
+
+    function solveCaptchaCore(inputImg, hooks, options) {
+        hooks = hooks || {};
+        options = options || {};
         var allStart = Date.now();
         var stats = newCaptchaStats();
         runtime.captchaStats = stats;
         clearMathCaptchaInputPrefocus();
-        logx("验证码阶段开始，等待弹窗渲染 " + CONFIG.afterConfirmCaptchaWaitMs + "ms");
-        sleep(CONFIG.afterConfirmCaptchaWaitMs);
+        var skipWait = options.skipInitialWait === true;
+        if (!skipWait) {
+            logx("验证码阶段开始，等待弹窗渲染 " + CONFIG.afterConfirmCaptchaWaitMs + "ms");
+            sleep(CONFIG.afterConfirmCaptchaWaitMs);
+        } else {
+            logx("验证码模拟阶段开始，跳过弹窗等待");
+        }
         var waitCost = Date.now() - allStart;
         stats.wait = waitCost;
 
@@ -2169,12 +2184,19 @@ function createNanjingBookingCaptchaSolver(deps) {
         var regions = buildExpressionRegions();
         var failureRegion = regions.length ? regions[0] : scaledRegion(CONFIG.captcha.expressionRegion);
         try {
-            logx("验证码开始截图 regions=" + JSON.stringify(regions));
-            img = captureScreen();
-            captureCost = Date.now() - captureStart;
-            stats.capture = captureCost;
-            logx("验证码截图完成 capture=" + captureCost + "ms");
-            saveCaptchaSceneBeforeSolve(img);
+            if (inputImg) {
+                img = inputImg;
+                captureCost = 0;
+                stats.capture = captureCost;
+                logx("验证码模拟使用外部截图 regions=" + JSON.stringify(regions));
+            } else {
+                logx("验证码开始截图 regions=" + JSON.stringify(regions));
+                img = captureScreen();
+                captureCost = Date.now() - captureStart;
+                stats.capture = captureCost;
+                logx("验证码截图完成 capture=" + captureCost + "ms");
+                saveCaptchaSceneBeforeSolve(img);
+            }
 
             recognizeStart = Date.now();
             var trackProbe = detectSliderCaptchaByTrack(img);
@@ -2209,6 +2231,20 @@ function createNanjingBookingCaptchaSolver(deps) {
                     stats.captchaType = "slider";
                     failureRegion = sliderResult.region;
 
+                    if (typeof hooks.beforeSliderDrag === "function") {
+                        var sliderProfile = activeSliderProfile();
+                        var sliderHookResult = hooks.beforeSliderDrag({
+                            type: "slider",
+                            trackProbe: trackProbe,
+                            sliderResult: sliderResult,
+                            handleRegion: sliderProfile ? normalizeProfileRegion(sliderProfile.handleRegion, "profileSliderHandle", true) : null,
+                            submitRegion: sliderProfile ? normalizeProfileRegion(sliderProfile.submitRegion, "profileSliderSubmit", true) : null
+                        });
+                        if (sliderHookResult && sliderHookResult.ok === false) {
+                            throw new Error(sliderHookResult.reason || "slider_overlay_not_ready");
+                        }
+                    }
+
                     inputStart = Date.now();
                     var dragResult = dragSliderCaptcha(sliderResult);
                     inputCost = Date.now() - inputStart;
@@ -2219,17 +2255,33 @@ function createNanjingBookingCaptchaSolver(deps) {
                     stats.answer = "";
                     stats.detail = sliderResult.detail;
 
+                    if (typeof hooks.afterSliderDrag === "function") {
+                        hooks.afterSliderDrag({
+                            type: "slider",
+                            trackProbe: trackProbe,
+                            sliderResult: sliderResult,
+                            dragResult: dragResult,
+                            stats: stats
+                        });
+                    }
+
                     logx("滑块验证码识别成功 " + sliderResult.detail +
                         " wait=" + waitCost + "ms capture=" + captureCost +
                         "ms recognize=" + recognizeCost + "ms input=" + inputCost + "ms total=" + (Date.now() - allStart) + "ms");
                     logx("验证码耗时汇总 " + captchaStatsText(stats, Date.now() - allStart));
-                    return {
+                    var sliderSuccess = {
                         ok: true,
                         type: "slider",
                         detail: sliderResult.detail,
                         finalSubmitSkipped: dragResult && dragResult.finalSubmitSkipped === true,
                         stats: stats
                     };
+                    if (options.formalMode !== true) {
+                        sliderSuccess.trackProbe = trackProbe;
+                        sliderSuccess.sliderResult = sliderResult;
+                        sliderSuccess.dragResult = dragResult;
+                    }
+                    return sliderSuccess;
                 }
                 recognizeCost = Date.now() - recognizeStart;
                 stats.recognize = recognizeCost;
@@ -2242,7 +2294,7 @@ function createNanjingBookingCaptchaSolver(deps) {
                 saveCaptchaFailure(img, failureRegion, stats.reason);
                 logx("滑块验证码类型已命中，但目标定位失败，保留页面给人工兜底 reason=" + sliderResult.reason);
                 logx("验证码耗时汇总 " + captchaStatsText(stats, Date.now() - allStart));
-                return {
+                var sliderFail = {
                     ok: false,
                     manualFallback: true,
                     type: "slider",
@@ -2250,8 +2302,26 @@ function createNanjingBookingCaptchaSolver(deps) {
                     detail: sliderResult.detail || "",
                     stats: stats
                 };
+                if (options.formalMode !== true) {
+                    sliderFail.trackProbe = trackProbe;
+                    sliderFail.sliderResult = sliderResult;
+                }
+                return sliderFail;
             } else {
                 logx("未识别为滑块验证码，进入数学题 OCR");
+                if (typeof hooks.beforeMathInput === "function") {
+                    var mathProfile = activeMathProfile();
+                    var mathHookResult = hooks.beforeMathInput({
+                        type: "math",
+                        trackProbe: trackProbe,
+                        expressionRegion: mathProfile ? normalizeProfileRegion(mathProfile.expressionRegion, "profileMathExpression", true) : null,
+                        inputRegion: mathProfile ? normalizeProfileRegion(mathProfile.inputRegion, "profileMathInput", true) : null,
+                        submitRegion: mathProfile ? normalizeProfileRegion(mathProfile.submitRegion, "profileMathSubmit", true) : null
+                    });
+                    if (mathHookResult && mathHookResult.ok === false) {
+                        throw new Error(mathHookResult.reason || "math_overlay_not_ready");
+                    }
+                }
                 prefocusMathCaptchaInput("before_math_ocr");
             }
 
@@ -2261,13 +2331,13 @@ function createNanjingBookingCaptchaSolver(deps) {
                 logx("数学题验证码 OCR 为空，等待 " + retryWait + "ms 后重新截图识别");
                 sleep(retryWait);
                 stats.wait += retryWait;
-                if (img) {
+                if (img && !inputImg) {
                     try { img.recycle(); } catch (ignoredRetryRecycle) {}
                     img = null;
                 }
                 var retryCaptureStart = Date.now();
-                img = captureScreen();
-                var retryCaptureCost = Date.now() - retryCaptureStart;
+                img = inputImg || captureScreen();
+                var retryCaptureCost = inputImg ? 0 : (Date.now() - retryCaptureStart);
                 stats.capture += retryCaptureCost;
                 logx("验证码重试截图完成 capture=" + retryCaptureCost + "ms totalCapture=" + stats.capture + "ms");
                 result = recognizeCaptchaAcrossRegions(img, regions);
@@ -2282,13 +2352,17 @@ function createNanjingBookingCaptchaSolver(deps) {
                 stats.raw = result.raw || stats.raw;
                 stats.reason = result.reason;
                 logx("验证码耗时汇总 " + captchaStatsText(stats, Date.now() - allStart));
-                return {
+                var mathRecognizeFail = {
                     ok: false,
                     manualFallback: true,
                     type: "math",
                     reason: "验证码识别失败：" + result.reason + " raw=" + result.raw,
                     stats: stats
                 };
+                if (options.formalMode !== true) {
+                    mathRecognizeFail.recognition = result;
+                }
+                return mathRecognizeFail;
             }
 
             inputStart = Date.now();
@@ -2304,13 +2378,18 @@ function createNanjingBookingCaptchaSolver(deps) {
                 stats.reason = inputResult.reason;
                 logx("验证码输入未完成，保留页面给人工兜底 reason=" + inputResult.reason);
                 logx("验证码耗时汇总 " + captchaStatsText(stats, Date.now() - allStart));
-                return {
+                var mathInputFail = {
                     ok: false,
                     manualFallback: true,
                     type: "math",
                     reason: "验证码输入未完成：" + inputResult.reason,
                     stats: stats
                 };
+                if (options.formalMode !== true) {
+                    mathInputFail.recognition = result;
+                    mathInputFail.inputResult = inputResult;
+                }
+                return mathInputFail;
             }
             stats.outcome = "success";
             stats.raw = result.raw;
@@ -2322,7 +2401,7 @@ function createNanjingBookingCaptchaSolver(deps) {
                 " detail=" + result.detail + " wait=" + stats.wait + "ms capture=" + stats.capture +
                 "ms recognize=" + recognizeCost + "ms input=" + inputCost + "ms total=" + (Date.now() - allStart) + "ms");
             logx("验证码耗时汇总 " + captchaStatsText(stats, Date.now() - allStart));
-            return {
+            var mathSuccess = {
                 ok: true,
                 type: "math",
                 raw: result.raw,
@@ -2332,10 +2411,16 @@ function createNanjingBookingCaptchaSolver(deps) {
                 finalSubmitSkipped: inputResult && inputResult.finalSubmitSkipped === true,
                 stats: stats
             };
+            if (options.formalMode !== true) {
+                mathSuccess.recognition = result;
+                mathSuccess.inputResult = inputResult;
+            }
+            return mathSuccess;
         } catch (e) {
             stats.outcome = stats.outcome === "fail" ? stats.outcome : "exception";
             stats.reason = stats.reason || String(e);
-            logx("验证码阶段异常 err=" + e + " stack=" + (e && e.stack ? e.stack : ""));
+            var exceptionLogPrefix = options.formalMode === true ? "验证码阶段异常" : "验证码模拟阶段异常";
+            logx(exceptionLogPrefix + " err=" + e + " stack=" + (e && e.stack ? e.stack : ""));
             if (img) {
                 saveCaptchaFailure(img, failureRegion, "exception=" + e);
             }
@@ -2344,20 +2429,30 @@ function createNanjingBookingCaptchaSolver(deps) {
                 ok: false,
                 manualFallback: true,
                 type: stats.captchaType || "",
-                reason: "验证码阶段异常：" + e,
+                reason: (options.formalMode === true ? "验证码阶段异常：" : "验证码模拟阶段异常：") + e,
                 stats: stats
             };
         } finally {
             clearMathCaptchaInputPrefocus();
             runtime.captchaStats = null;
-            if (img) {
+            if (img && options.recycleImage !== false) {
                 try { img.recycle(); } catch (ignoredRecycle) {}
             }
         }
     }
 
+    function solveWithImageAndHooks(inputImg, hooks, options) {
+        options = options || {};
+        return solveCaptchaCore(inputImg, hooks || {}, {
+            skipInitialWait: options.skipInitialWait === true,
+            recycleImage: options.recycleImage !== false,
+            formalMode: false
+        });
+    }
+
     return {
         solveAfterConfirm: solveAfterConfirm,
+        solveWithImageAndHooks: solveWithImageAndHooks,
         recognizeMathFromImage: recognizeMathFromImage,
         probeSliderFromImage: probeSliderFromImage,
         recognizeSliderFromImage: function (img, region) {
