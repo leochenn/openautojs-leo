@@ -117,6 +117,7 @@ var CONFIG = {
             pollutedFallbackMaxDarkRatio: 0.22,
             pollutedFallbackMinCenterRatio: 0.25,
             pollutedFallbackRequireNoGrayCandidate: true,
+            pollutedEdgeMinSideRatio: 0.75,
             fastImageMinColumnHits: 3,
             grayMin: 165,
             grayMax: 245,
@@ -131,6 +132,8 @@ var CONFIG = {
             sliderTargetMinMoveRatio: 0.12,
             sliderFastCandidateMinScore: 60,
             sliderFastCandidateWeakScore: 45,
+            sliderSmallLargeMaxRatio: 0.94,
+            sliderSmallMaxScoreGap: 25,
             minArea: 3000
         }
     }

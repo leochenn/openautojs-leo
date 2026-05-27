@@ -1592,12 +1592,14 @@ function createNanjingBookingCaptchaSolver(deps) {
         var cfg = CONFIG.captcha.slider;
         var weakScore = cfg.sliderFastCandidateWeakScore || 45;
         var strongScore = cfg.sliderFastCandidateMinScore || 60;
+        var smallLargeMaxRatio = cfg.sliderSmallLargeMaxRatio || 0.94;
+        var smallMaxScoreGap = cfg.sliderSmallMaxScoreGap || 25;
         var scored = [];
         var details = [];
         for (var i = 0; i < boxes.length; i++) {
             var box = scoreSliderBox(region, boxes[i]);
             scored.push(box);
-            details.push(Math.round(box.centerX) + ":" + Math.round(box.score));
+            details.push(Math.round(box.centerX) + ":" + Math.round(box.w) + ":" + Math.round(box.score));
         }
         scored.sort(function (a, b) {
             if ((a.score || 0) !== (b.score || 0)) return (b.score || 0) - (a.score || 0);
@@ -1617,7 +1619,36 @@ function createNanjingBookingCaptchaSolver(deps) {
                 detail: "scores=" + details.join(",")
             };
         }
-        var target = candidates[0];
+        var sizeChoice = null;
+        var sizeRejectDetail = "";
+        if (candidates.length >= 2) {
+            var byWidth = candidates.slice(0);
+            byWidth.sort(function (a, b) {
+                if (a.w !== b.w) return a.w - b.w;
+                return (b.score || 0) - (a.score || 0);
+            });
+            var small = byWidth[0];
+            var large = byWidth[byWidth.length - 1];
+            var sizeRatio = small.w / Math.max(1, large.w);
+            var scoreGap = (candidates[0].score || 0) - (small.score || 0);
+            if (sizeRatio <= smallLargeMaxRatio) {
+                if (scoreGap <= smallMaxScoreGap) {
+                    sizeChoice = {
+                        target: small,
+                        large: large,
+                        ratio: sizeRatio,
+                        scoreGap: scoreGap
+                    };
+                } else {
+                    sizeRejectDetail = " sizeReject=scoreGap sizeRatio=" + sizeRatio.toFixed(2) +
+                        " scoreGap=" + Math.round(scoreGap) +
+                        " maxGap=" + smallMaxScoreGap +
+                        " smallW=" + Math.round(small.w) +
+                        " largeW=" + Math.round(large.w);
+                }
+            }
+        }
+        var target = sizeChoice ? sizeChoice.target : candidates[0];
         if (boxes.length === 1 && (target.score || 0) < strongScore) {
             return {
                 ok: false,
@@ -1627,14 +1658,22 @@ function createNanjingBookingCaptchaSolver(deps) {
             };
         }
         var selected = [target];
+        if (sizeChoice && sizeChoice.large !== target) selected.push(sizeChoice.large);
         for (var k = 0; k < scored.length && selected.length < 2; k++) {
-            if (scored[k] !== target) selected.push(scored[k]);
+            if (scored[k] !== target && scored[k] !== selected[1]) selected.push(scored[k]);
+        }
+        var sizeDetail = "";
+        if (sizeChoice) {
+            sizeDetail = " sizeRole=small sizeRatio=" + sizeChoice.ratio.toFixed(2) +
+                " scoreGap=" + Math.round(sizeChoice.scoreGap) +
+                " smallW=" + Math.round(sizeChoice.target.w) +
+                " largeW=" + Math.round(sizeChoice.large.w);
         }
         return {
             ok: true,
             target: target,
             boxes: selected,
-            detail: "scores=" + details.join(",") + " minTargetX=" + Math.round(target.minTargetX)
+            detail: "scores=" + details.join(",") + " minTargetX=" + Math.round(target.minTargetX) + sizeDetail + sizeRejectDetail
         };
     }
 
@@ -1983,6 +2022,18 @@ function createNanjingBookingCaptchaSolver(deps) {
             return a.centerX - b.centerX;
         });
         var best = pool[0];
+        var minAcceptedSide = scaleX((cfg.minSide || 90) * (cfg.pollutedEdgeMinSideRatio || 0.75));
+        if (best.w < minAcceptedSide) {
+            return {
+                ok: false,
+                reason: "polluted_edge_too_small w=" + Math.round(best.w) +
+                    " min=" + Math.round(minAcceptedSide) +
+                    " score=" + best.score.toFixed(1) +
+                    " candidates=" + candidates.length +
+                    " rejectedConfidence=" + rejectedConfidence,
+                boxes: [best]
+            };
+        }
         return buildSliderResult(region, [best], "polluted_edge",
             "score=" + best.score.toFixed(1) +
             " neutral=" + best.neutralRatio.toFixed(2) +
