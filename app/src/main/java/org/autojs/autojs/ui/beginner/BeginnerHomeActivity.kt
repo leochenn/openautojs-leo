@@ -440,17 +440,21 @@ private fun SettingsDialog(
                 )
                 Spacer(modifier = Modifier.height(20.dp))
 
-                OutlinedButton(
-                    onClick = onAdvancedMode,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = ButtonShape,
-                    border = BorderStroke(1.dp, AppPrimary.copy(alpha = 0.55f)),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = AppPrimary)
-                ) {
-                    Text(text = "高级模式")
-                }
+                // 高级模式按钮（暂时隐藏，设置 showAdvancedMode = true 可恢复显示）
+                val showAdvancedMode = false
+                if (showAdvancedMode) {
+                    OutlinedButton(
+                        onClick = onAdvancedMode,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = ButtonShape,
+                        border = BorderStroke(1.dp, AppPrimary.copy(alpha = 0.55f)),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = AppPrimary)
+                    ) {
+                        Text(text = "高级模式")
+                    }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
 
                 OutlinedButton(
                     onClick = onLogUpload,
