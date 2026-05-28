@@ -8,7 +8,11 @@ import java.io.FileNotFoundException
 import java.util.Calendar
 import java.util.GregorianCalendar
 
+const val EXHIBIT_MODE_NANJING = "nanjing"
+const val EXHIBIT_MODE_JUSTICE = "justice"
+
 data class BookingConfig(
+    val exhibitMode: String = EXHIBIT_MODE_NANJING,
     val visitDate: String = "0521",
     val period: String = "上午",
     val visitorCount: Int = 2,
@@ -112,6 +116,9 @@ object AutomationScripts {
     }
 
     fun validateConfig(config: BookingConfig): String? {
+        if (config.exhibitMode != EXHIBIT_MODE_NANJING && config.exhibitMode != EXHIBIT_MODE_JUSTICE) {
+            return "展馆只能选择南京或正义必胜"
+        }
         if (!Regex("^\\d{4}$").matches(config.visitDate)) {
             return "参观日期必须是 4 位 MMDD，例如 0521"
         }
@@ -146,6 +153,8 @@ object AutomationScripts {
 
     private fun fromJson(json: JSONObject): BookingConfig {
         return BookingConfig(
+            exhibitMode = json.optString("exhibitMode", defaultConfig.exhibitMode).trim()
+                .ifEmpty { defaultConfig.exhibitMode },
             visitDate = json.optString("visitDate", defaultConfig.visitDate).trim(),
             period = json.optString("period", defaultConfig.period).trim(),
             visitorCount = json.optInt("visitorCount", defaultConfig.visitorCount),
@@ -156,6 +165,7 @@ object AutomationScripts {
     private fun writeConfigFile(file: File, config: BookingConfig) {
         file.parentFile?.mkdirs()
         val json = JSONObject()
+            .put("exhibitMode", config.exhibitMode)
             .put("visitDate", config.visitDate)
             .put("period", config.period)
             .put("visitorCount", config.visitorCount)

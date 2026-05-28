@@ -60,6 +60,8 @@ import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import org.autojs.autojs.external.inputmethod.CaptchaInputMethodStatus
 import org.autojs.autojs.model.automation.AutomationScripts
 import org.autojs.autojs.model.automation.BookingConfig
+import org.autojs.autojs.model.automation.EXHIBIT_MODE_JUSTICE
+import org.autojs.autojs.model.automation.EXHIBIT_MODE_NANJING
 import org.autojs.autojs.model.script.ScriptFile
 import org.autojs.autojs.model.script.Scripts
 import org.autojs.autojs.tool.AccessibilityServiceTool
@@ -149,11 +151,13 @@ private fun BeginnerHomeScreen(
         else -> "正式抢票前需要完成数学和滑块区域校准"
     }
 
+    var exhibitMode by rememberSaveable { mutableStateOf(initialConfig.exhibitMode) }
     var visitDate by rememberSaveable { mutableStateOf(initialConfig.visitDate) }
     var period by rememberSaveable { mutableStateOf(initialConfig.period) }
     var visitorCount by rememberSaveable { mutableStateOf(initialConfig.visitorCount) }
     var startTime by rememberSaveable { mutableStateOf(initialConfig.startTime) }
     val config = BookingConfig(
+        exhibitMode = exhibitMode,
         visitDate = visitDate.trim(),
         period = period,
         visitorCount = visitorCount,
@@ -255,6 +259,8 @@ private fun BeginnerHomeScreen(
                 fontWeight = FontWeight.SemiBold
             )
             ConfigCard(
+                exhibitMode = exhibitMode,
+                onExhibitModeChange = { exhibitMode = it },
                 visitDate = visitDate,
                 onVisitDateChange = { value ->
                     if (value.length <= 4 && value.all { it.isDigit() }) {
@@ -572,6 +578,8 @@ private fun SetupStatusRow(
 
 @Composable
 private fun ConfigCard(
+    exhibitMode: String,
+    onExhibitModeChange: (String) -> Unit,
     visitDate: String,
     onVisitDateChange: (String) -> Unit,
     period: String,
@@ -608,6 +616,25 @@ private fun ConfigCard(
                 color = AppTextSecondary,
                 style = MaterialTheme.typography.bodySmall
             )
+
+            Text(text = "展馆", style = MaterialTheme.typography.titleSmall)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                SelectableButton(
+                    modifier = Modifier.weight(1f),
+                    text = "南京",
+                    selected = exhibitMode == EXHIBIT_MODE_NANJING,
+                    onClick = { onExhibitModeChange(EXHIBIT_MODE_NANJING) }
+                )
+                SelectableButton(
+                    modifier = Modifier.weight(1f),
+                    text = "正义必胜",
+                    selected = exhibitMode == EXHIBIT_MODE_JUSTICE,
+                    onClick = { onExhibitModeChange(EXHIBIT_MODE_JUSTICE) }
+                )
+            }
 
             Text(text = "参观时段", style = MaterialTheme.typography.titleSmall)
             Row(

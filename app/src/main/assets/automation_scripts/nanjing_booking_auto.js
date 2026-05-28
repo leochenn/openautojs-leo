@@ -8,6 +8,7 @@
 // ==================== 配置区 ====================
 var CONFIG = {
     appShortcutName: "侵华日军南京大屠杀遇难同胞纪念馆参观预约", // 桌面快捷方式名称；第一轮启动小程序时用于无障碍查找图标
+    exhibitMode: "nanjing", // 可选："nanjing"、"justice"；旧配置缺失时默认南京展馆
     visitDate: "0521", // MMDD，例如 0505；日期网格按当前周周日到下周六两行显示
     period: "上午", // 可选："上午"、"下午"
     visitorCount: 2, // 1-5
@@ -129,6 +130,61 @@ var CONFIG = {
     }
 };
 
+var EXHIBIT_PROFILES = {
+    nanjing: {
+        id: "nanjing",
+        shortName: "南京",
+        fullTitle: "南京大屠杀史实展",
+        homeCardIndex: 0,
+        homeCardRegion: { y: 760, h: 760 },
+        homeButtonFallback: { x: 310, y: 1320 },
+        homeTitleKeywords: ["南京大屠杀"],
+        homeTitleButtonOffsetY: 260,
+        dateGridYs: [980, 1210],
+        fallbackPeriodTitleY: 1850,
+        fallbackPeriodMorning: { x: 400, y: 2095 },
+        fallbackPeriodAfternoon: { x: 1045, y: 2095 },
+        fallbackVisitorStartY: 2050,
+        fallbackEstimatedAudienceTitleY: 2350,
+        cachePath: "/sdcard/OpenAutoJS_NanjingBooking/nanjing_booking_cache.json",
+        backupCachePath: "/sdcard/nanjing_booking_cache.json"
+    },
+    justice: {
+        id: "justice",
+        shortName: "正义必胜",
+        fullTitle: "正义必胜 和平必胜 人民必胜--中国战区反法西斯战争胜利暨审判日本战犯史实展",
+        homeCardIndex: 1,
+        homeCardRegion: { y: 1510, h: 700 },
+        homeButtonFallback: { x: 1150, y: 1935 },
+        homeTitleKeywords: ["正义必胜", "和平必胜", "人民必胜", "反法西斯", "审判日本战犯"],
+        homeTitleButtonOffsetY: 120,
+        dateGridYs: [1080, 1310],
+        fallbackPeriodTitleY: 1950,
+        fallbackPeriodMorning: { x: 400, y: 2195 },
+        fallbackPeriodAfternoon: { x: 1045, y: 2195 },
+        fallbackVisitorStartY: 2150,
+        fallbackEstimatedAudienceTitleY: 2450,
+        cachePath: "/sdcard/OpenAutoJS_NanjingBooking/nanjing_booking_justice_cache.json",
+        backupCachePath: "/sdcard/nanjing_booking_justice_cache.json"
+    }
+};
+
+function currentExhibitProfile() {
+    return EXHIBIT_PROFILES[CONFIG.exhibitMode] || EXHIBIT_PROFILES.nanjing;
+}
+
+function applyCurrentExhibitProfile() {
+    var profile = currentExhibitProfile();
+    CONFIG.currentExhibit = {
+        id: profile.id,
+        shortName: profile.shortName,
+        fullTitle: profile.fullTitle,
+        homeCardIndex: profile.homeCardIndex
+    };
+    CONFIG.cachePath = profile.cachePath;
+    CONFIG.backupCachePath = profile.backupCachePath;
+}
+
 function bookingConfigScriptDir() {
     try {
         var source = engines.myEngine().source;
@@ -155,6 +211,7 @@ function applyExternalBookingConfig() {
         if (!files.exists(path)) return;
         var external = JSON.parse(files.read(path));
         if (!external) return;
+        if (external.exhibitMode !== undefined) CONFIG.exhibitMode = String(external.exhibitMode);
         if (external.visitDate !== undefined) CONFIG.visitDate = String(external.visitDate);
         if (external.period !== undefined) CONFIG.period = String(external.period);
         if (external.visitorCount !== undefined) {
@@ -166,6 +223,7 @@ function applyExternalBookingConfig() {
 }
 
 applyExternalBookingConfig();
+applyCurrentExhibitProfile();
 
 var STAGE = "INIT";
 var runtime = {
@@ -742,6 +800,10 @@ function loadCache() {
         cache = {};
     } else {
         logx("CACHE", "读取缓存 path=" + runtime.cachePath + " version=" + cache.version + " collectedAt=" + cache.collectedAt);
+        if (cache.exhibitMode && cache.exhibitMode !== CONFIG.exhibitMode) {
+            logx("CACHE", "缓存展馆模式不一致，跳过旧缓存 cache=" + cache.exhibitMode + " current=" + CONFIG.exhibitMode);
+            cache = {};
+        }
     }
 
     if (!cache.screen || cache.screen.width !== device.width || cache.screen.height !== device.height) {
@@ -760,6 +822,8 @@ function loadCache() {
 
 function saveCache() {
     runtime.cache.version = CONFIG.version;
+    runtime.cache.exhibitMode = CONFIG.exhibitMode;
+    runtime.cache.exhibitName = currentExhibitProfile().shortName;
     runtime.cache.screen = { width: device.width, height: device.height };
     runtime.cache.collectedAt = nowText();
     var ok = writeJson(runtime.cachePath, runtime.cache);
@@ -836,7 +900,9 @@ function logRushPlan(reason) {
             visitDate: CONFIG.visitDate,
             period: CONFIG.period,
             visitorCount: CONFIG.visitorCount,
-            startTime: CONFIG.startTime
+            startTime: CONFIG.startTime,
+            exhibitMode: CONFIG.exhibitMode,
+            exhibitName: currentExhibitProfile().shortName
         },
         screen: { width: device.width, height: device.height },
         points: {
@@ -895,6 +961,11 @@ function fuzzyContains(text, keyword) {
     if (k === "普通预约标题") return t.indexOf("普通") >= 0;
     if (k === "用户确认登录") return t.indexOf("用户") >= 0 && t.indexOf("登录") >= 0;
     if (k === "南京大屠杀") return t.indexOf("南京") >= 0 && t.indexOf("屠杀") >= 0;
+    if (k === "正义必胜") return t.indexOf("正义") >= 0 && t.indexOf("必胜") >= 0;
+    if (k === "和平必胜") return t.indexOf("和平") >= 0 && t.indexOf("必胜") >= 0;
+    if (k === "人民必胜") return t.indexOf("人民") >= 0 && t.indexOf("必胜") >= 0;
+    if (k === "反法西斯") return t.indexOf("反法") >= 0 || t.indexOf("法西斯") >= 0;
+    if (k === "审判日本战犯") return t.indexOf("审判") >= 0 && (t.indexOf("日本") >= 0 || t.indexOf("战犯") >= 0);
     if (k === "参观日期") return t.indexOf("参观") >= 0 && t.indexOf("日期") >= 0;
     if (k === "观众信息") return t.indexOf("观众") >= 0 && t.indexOf("信息") >= 0;
     if (k === "选择时段") return t.indexOf("选择") >= 0 && t.indexOf("时段") >= 0;
@@ -1028,11 +1099,12 @@ function getHomeExhibitPoint() {
     var cached = getCachedPoint("homeExhibit");
     if (cached) return cached;
 
-    // 只在第一个展馆卡片区域内找“点击预约”，避免误点第二/第三个展馆。
-    var firstCardRegion = [0, scaleY(760), device.width, scaleY(760)];
-    var items = ocrRegion(STAGE, "首页查找南京大屠杀入口-第一卡片", firstCardRegion);
+    var profile = currentExhibitProfile();
+    var cardRegion = [0, scaleY(profile.homeCardRegion.y), device.width, scaleY(profile.homeCardRegion.h)];
+    var cardLabel = "第" + (profile.homeCardIndex + 1) + "卡片";
+    var items = ocrRegion(STAGE, "首页查找" + profile.shortName + "入口-" + cardLabel, cardRegion);
     if (findTextItem(items, "预约须知", "top")) {
-        logx("PAGE", "首页第一卡片区域仍被预约须知覆盖，暂不推算首页入口");
+        logx("PAGE", "首页" + cardLabel + "区域仍被预约须知覆盖，暂不推算首页入口");
         return null;
     }
     var bookingItems = [];
@@ -1042,28 +1114,29 @@ function getHomeExhibitPoint() {
     if (bookingItems.length > 0) {
         bookingItems.sort(function(a, b) { return itemRect(a).cy - itemRect(b).cy; });
         var p = centerOfBounds(bookingItems[0].bounds, "ocr:homeClickBooking");
-        logx("COORD", "首页第一展馆按钮匹配 text=" + bookingItems[0].text + " " + pointText(p));
+        logx("COORD", "首页" + cardLabel + profile.shortName + "按钮匹配 text=" + bookingItems[0].text + " " + pointText(p));
         setCachedPoint("homeExhibit", p);
         return p;
     }
 
-    var titleItem = findTextItem(items, "南京大屠杀", "top");
+    var titleItem = findTextItem(items, profile.homeTitleKeywords, "top");
     if (titleItem) {
         var r = itemRect(titleItem);
-        var inferred = makePoint(scaleX(310), r.cy + scaleY(260), "infer:firstCardTitleBelowButton");
-        logx("COORD", "首页第一展馆标题匹配 text=" + titleItem.text + " 推算按钮 " + pointText(inferred));
+        var inferred = makePoint(scaleX(profile.homeButtonFallback.x), r.cy + scaleY(profile.homeTitleButtonOffsetY), "infer:homeCardTitleBelowButton:" + profile.id);
+        logx("COORD", "首页" + cardLabel + profile.shortName + "标题匹配 text=" + titleItem.text + " 推算按钮 " + pointText(inferred));
         setCachedPoint("homeExhibit", inferred);
         return inferred;
     }
 
-    var fallback = scaledPoint("homeExhibitFirstCardButton", 310, 1320);
+    var fallback = scaledPoint("homeExhibitCardButton:" + profile.id, profile.homeButtonFallback.x, profile.homeButtonFallback.y);
     setCachedPoint("homeExhibit", fallback);
     return fallback;
 }
 
 function findHomeExhibitPointOnCurrentPage(label) {
-    var firstCardRegion = [0, scaleY(760), device.width, scaleY(760)];
-    var items = ocrRegion(STAGE, label, firstCardRegion);
+    var profile = currentExhibitProfile();
+    var cardRegion = [0, scaleY(profile.homeCardRegion.y), device.width, scaleY(profile.homeCardRegion.h)];
+    var items = ocrRegion(STAGE, label + "-" + profile.shortName, cardRegion);
     if (findTextItem(items, "预约须知", "top")) return null;
 
     var bookingItems = [];
@@ -1078,10 +1151,10 @@ function findHomeExhibitPointOnCurrentPage(label) {
         return p;
     }
 
-    var titleItem = findTextItem(items, "南京大屠杀", "top");
+    var titleItem = findTextItem(items, profile.homeTitleKeywords, "top");
     if (titleItem) {
         var r = itemRect(titleItem);
-        var inferred = makePoint(scaleX(310), r.cy + scaleY(260), "infer:firstCardTitleBelowButtonAfterLogin");
+        var inferred = makePoint(scaleX(profile.homeButtonFallback.x), r.cy + scaleY(profile.homeTitleButtonOffsetY), "infer:homeCardTitleBelowButtonAfterLogin:" + profile.id);
         logx("COORD", label + " 标题匹配 text=" + titleItem.text + " 推算按钮 " + pointText(inferred));
         setCachedPoint("homeExhibit", inferred);
         return inferred;
@@ -1138,11 +1211,13 @@ function collectDatePoint() {
 }
 
 function buildVisibleDateGridFromToday() {
+    var profile = currentExhibitProfile();
     var today = new Date();
     var start = new Date(today.getFullYear(), today.getMonth(), today.getDate());
     start.setDate(start.getDate() - start.getDay());
     var xs = [scaleX(190), scaleX(365), scaleX(545), scaleX(720), scaleX(900), scaleX(1080), scaleX(1255)];
-    var ys = [scaleY(980), scaleY(1210)];
+    var ys = [scaleY(profile.dateGridYs[0]), scaleY(profile.dateGridYs[1])];
+    logx("COORD", "日期网格使用展馆基准 exhibit=" + profile.id + " baseY=" + profile.dateGridYs.join(","));
     var points = {};
     var labels = [];
     for (var i = 0; i < 14; i++) {
@@ -1224,7 +1299,8 @@ function collectAudienceAndPeriodPoints() {
         logx("COORD", "第一轮未显示选择时段，已按观众信息标题位置推算第二轮时段区域");
     } else {
         setCacheValue("prepareDetailLayoutMode", "fallback-period-title");
-        var inferredTitle = makePoint(scaleX(220), scaleY(1850), "infer:periodTitleFromOpenedLayout");
+        var profile = currentExhibitProfile();
+        var inferredTitle = makePoint(scaleX(220), scaleY(profile.fallbackPeriodTitleY), "infer:periodTitleFromOpenedLayout:" + profile.id);
         setCachedPoint("periodTitle", inferredTitle);
         setPeriodPointsFromTitle(inferredTitle, "infer-from-screenshot-layout");
         logx("COORD", "第一轮未找到观众信息标题，已按可预约截图布局推算时段区域");
@@ -1276,7 +1352,7 @@ function estimateRushAudienceTitleY(audienceTitle) {
     if (isPreparePeriodVisibleLayout() && runtime.cache.points && runtime.cache.points.periodTitle) {
         return Math.round(runtime.cache.points.periodTitle.y + scaleY(560));
     }
-    return scaleY(2350);
+    return scaleY(currentExhibitProfile().fallbackEstimatedAudienceTitleY);
 }
 
 function buildAudienceGestureScrollStrategy(audienceTitle) {
@@ -1359,8 +1435,8 @@ function collectVisitorPoints(audienceTitle) {
     if (audienceTitle) {
         startY = audienceTitle.y + scaleY(360);
     } else {
-        startY = scaleY(2050);
-        logx("COORD", "观众信息标题未识别，游客坐标使用截图比例推算起点");
+        startY = scaleY(currentExhibitProfile().fallbackVisitorStartY);
+        logx("COORD", "观众信息标题未识别，游客坐标使用展馆截图比例推算起点 exhibit=" + currentExhibitProfile().id);
     }
     var points = [];
     var gap = scaleY(365);
@@ -1403,7 +1479,9 @@ function getPeriodPoint() {
         setPeriodPointsFromTitle(title, "ocr");
         return getCachedPoint(key) || runtime.cache.points[key];
     }
-    var fallback = CONFIG.period === "下午" ? scaledPoint("periodAfternoon", 1045, 2095) : scaledPoint("periodMorning", 400, 2095);
+    var profile = currentExhibitProfile();
+    var periodFallback = CONFIG.period === "下午" ? profile.fallbackPeriodAfternoon : profile.fallbackPeriodMorning;
+    var fallback = scaledPoint(CONFIG.period === "下午" ? "periodAfternoon" : "periodMorning", periodFallback.x, periodFallback.y);
     setCachedPoint(key, fallback);
     return fallback;
 }
@@ -1579,14 +1657,15 @@ function waitNoticeGone(timeoutMs) {
 }
 
 function enterHomeExhibitionPage() {
+    var profile = currentExhibitProfile();
     for (var attempt = 1; attempt <= 3; attempt++) {
-        logx("PAGE", "进入第一展馆尝试 attempt=" + attempt);
+        logx("PAGE", "进入展馆尝试 exhibit=" + profile.shortName + " cardIndex=" + (profile.homeCardIndex + 1) + " attempt=" + attempt);
         var p = getHomeExhibitPoint();
         if (!p) {
-            logx("PAGE", "未获得第一展馆入口坐标");
+            logx("PAGE", "未获得展馆入口坐标 exhibit=" + profile.shortName);
             return false;
         }
-        pressPoint("首页-南京大屠杀入口", p, CONFIG.pressDuration);
+        pressPoint("首页-" + profile.shortName + "入口", p, CONFIG.pressDuration);
         var ok = waitForText("参观预约-普通预约", ["普通预约", "亲子预约", "优待预约"], [0, scaleY(600), device.width, scaleY(1700)], 6000);
         if (ok) return true;
         logx("PAGE", "点击首页入口后未确认展馆页 attempt=" + attempt);
@@ -1635,7 +1714,7 @@ function waitForBookingPageOnly(timeoutMs) {
 }
 
 function reenterBookingPageAfterLogin() {
-    logx("LOGIN", "登录后按固定路径重新进入预约页：首页 -> 南京大屠杀展馆 -> 普通预约");
+    logx("LOGIN", "登录后按固定路径重新进入预约页：首页 -> " + currentExhibitProfile().shortName + "展馆 -> 普通预约");
     // 业务前提：授权登录完成后小程序会回到首页。
     // 因此不再用 OCR 检查是否仍在预约详情页，避免登录后首页场景被慢 OCR 拖住。
 
@@ -1749,7 +1828,7 @@ function preRushLoginProbe() {
         sleep(1000);
         // 业务前提：抢票前探测轮完成授权登录后，小程序会回到首页。
         // 因此这里直接使用第一轮缓存的首页展馆入口坐标，避免额外页面分支和 OCR。
-        pressPoint("登录探测-首页南京大屠杀入口", requireCachedPoint("homeExhibit", "首页南京大屠杀入口"), CONFIG.fastPressDuration);
+        pressPoint("登录探测-首页" + currentExhibitProfile().shortName + "入口", requireCachedPoint("homeExhibit", "首页" + currentExhibitProfile().shortName + "入口"), CONFIG.fastPressDuration);
         sleep(1100);
         waitForNormalBookingListQuick("登录探测-确认参观预约页", 1500);
     } else {
@@ -1863,6 +1942,7 @@ function rushFlow() {
 }
 
 function validateConfig() {
+    if (!EXHIBIT_PROFILES[CONFIG.exhibitMode]) fail("exhibitMode 只能是 nanjing 或 justice，当前：" + CONFIG.exhibitMode);
     if (!/^\d{4}$/.test(CONFIG.visitDate)) fail("visitDate 必须是四位 MMDD 字符串，例如 0505/0425");
     var m = parseInt(CONFIG.visitDate.substring(0, 2), 10);
     var d = parseInt(CONFIG.visitDate.substring(2, 4), 10);
@@ -1879,6 +1959,7 @@ function validateConfig() {
 
 function initRuntime() {
     auto.waitFor();
+    applyCurrentExhibitProfile();
     runtime.screen = { width: device.width, height: device.height };
     runtime.runDir = CONFIG.outputDir + "/" + runDirText();
     runtime.latestLogPath = CONFIG.logPath;
@@ -1895,6 +1976,7 @@ function initRuntime() {
     logx("INIT", "脚本启动 version=" + CONFIG.version);
     logx("INIT", "配置=" + JSON.stringify(CONFIG));
     logx("INIT", "屏幕=" + device.width + "x" + device.height);
+    logx("INIT", "展馆模式 mode=" + CONFIG.exhibitMode + " name=" + currentExhibitProfile().shortName + " homeCardIndex=" + currentExhibitProfile().homeCardIndex);
     logx("INIT", "缓存路径 primary=" + CONFIG.cachePath + " backup=" + CONFIG.backupCachePath);
     logx("INIT", "本次运行目录=" + runtime.runDir);
     logx("INIT", "本次日志路径=" + runtime.logPath + " latest日志路径=" + runtime.latestLogPath);
