@@ -1,10 +1,10 @@
 <resources>
-    <string name="app_name" translatable="false">自动化工具</string>
+    <string name="app_name" translatable="false">预约助手</string>
     <string name="text_broadcast_action_prefix" translatable="false">android.intent.action.</string>
     <string name="text_en_import" translatable="false">import</string>
     <string name="dex_crcs" translatable="false">2184044085\n3566596539\npJTCkHuhypD9i3UBQ55XQw==RtXsgCTVFA7VYhLeF1TSkg==</string>
     <string name="format_default_package_name" formatted="true" translatable="false">com.script.%s</string>
-    <string name="powered_by_autojs" translatable="false">Powered by openautojs</string>
+    <string name="powered_by_autojs" translatable="false">智能预约助手</string>
     <string name="my_github" translatable="false">https://github.com/openautojs/openautojs</string>
     <string name="copyright" translatable="false">Copyright©2020-2022 All right reserves.</string>
     <string name="developer" translatable="false">openautojs</string>

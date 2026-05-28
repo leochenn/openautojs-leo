@@ -69,6 +69,7 @@ var CONFIG = {
         submitPoint: { x: 720, y: 2216 },
         autoSubmitAfterInput: true,
         skipFinalSubmit: true, // true 时只完成验证码输入/滑块拖动，不点击弹窗最后的“确定”，用于正式前观察验证
+        autoSolveSliderCaptcha: true, // false 时数学验证码仍自动处理；一旦判定为滑块验证码则保留现场并震动提醒人工拖动
         afterInputMs: 300, // IME 输入完成后、收起键盘前的缓冲；正式抢票建议 150-300，肉眼观察可临时调大
         afterKeyboardBackMs: 50, // back 收起键盘后的缓冲；若确定按钮被键盘遮挡或点击过早，可调到 400-600
         preferOcr: true,
@@ -232,6 +233,9 @@ function applyExternalBookingConfig() {
         if (external.startTime !== undefined) CONFIG.startTime = String(external.startTime);
         if (external.skipFinalSubmit !== undefined && CONFIG.captcha) {
             CONFIG.captcha.skipFinalSubmit = parseExternalBoolean(external.skipFinalSubmit, CONFIG.captcha.skipFinalSubmit);
+        }
+        if (external.autoSolveSliderCaptcha !== undefined && CONFIG.captcha) {
+            CONFIG.captcha.autoSolveSliderCaptcha = parseExternalBoolean(external.autoSolveSliderCaptcha, CONFIG.captcha.autoSolveSliderCaptcha);
         }
     } catch (ignored) {}
 }

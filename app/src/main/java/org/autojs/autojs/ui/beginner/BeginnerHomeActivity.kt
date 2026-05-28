@@ -157,13 +157,15 @@ private fun BeginnerHomeScreen(
     var visitorCount by rememberSaveable { mutableStateOf(initialConfig.visitorCount) }
     var startTime by rememberSaveable { mutableStateOf(initialConfig.startTime) }
     var skipFinalSubmit by rememberSaveable { mutableStateOf(initialConfig.skipFinalSubmit) }
+    var autoSolveSliderCaptcha by rememberSaveable { mutableStateOf(initialConfig.autoSolveSliderCaptcha) }
     val config = BookingConfig(
         exhibitMode = exhibitMode,
         visitDate = visitDate.trim(),
         period = period,
         visitorCount = visitorCount,
         startTime = startTime.trim(),
-        skipFinalSubmit = skipFinalSubmit
+        skipFinalSubmit = skipFinalSubmit,
+        autoSolveSliderCaptcha = autoSolveSliderCaptcha
     )
     val configError = AutomationScripts.validateConfig(config)
 
@@ -277,6 +279,8 @@ private fun BeginnerHomeScreen(
                 onStartTimeChange = { startTime = it },
                 skipFinalSubmit = skipFinalSubmit,
                 onSkipFinalSubmitChange = { skipFinalSubmit = it },
+                autoSolveSliderCaptcha = autoSolveSliderCaptcha,
+                onAutoSolveSliderCaptchaChange = { autoSolveSliderCaptcha = it },
                 error = configError
             )
 
@@ -594,6 +598,8 @@ private fun ConfigCard(
     onStartTimeChange: (String) -> Unit,
     skipFinalSubmit: Boolean,
     onSkipFinalSubmitChange: (Boolean) -> Unit,
+    autoSolveSliderCaptcha: Boolean,
+    onAutoSolveSliderCaptchaChange: (Boolean) -> Unit,
     error: String?
 ) {
     OutlinedCard(
@@ -692,6 +698,25 @@ private fun ConfigCard(
                 color = AppTextSecondary,
                 style = MaterialTheme.typography.bodySmall
             )
+
+            Text(text = "滑块验证码拖动", style = MaterialTheme.typography.titleSmall)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                SelectableButton(
+                    modifier = Modifier.weight(1f),
+                    text = "自动",
+                    selected = autoSolveSliderCaptcha,
+                    onClick = { onAutoSolveSliderCaptchaChange(true) }
+                )
+                SelectableButton(
+                    modifier = Modifier.weight(1f),
+                    text = "人工",
+                    selected = !autoSolveSliderCaptcha,
+                    onClick = { onAutoSolveSliderCaptchaChange(false) }
+                )
+            }
 
             Text(text = "验证码确定按钮", style = MaterialTheme.typography.titleSmall)
             Row(

@@ -1243,6 +1243,10 @@ function createNanjingBookingCaptchaSolver(deps) {
         return CONFIG.captcha && CONFIG.captcha.skipFinalSubmit === true;
     }
 
+    function shouldAutoSolveSliderCaptcha() {
+        return !(CONFIG.captcha && CONFIG.captcha.autoSolveSliderCaptcha === false);
+    }
+
     function notifyFinalSubmitSkipped(type, detail) {
         var msg = "验证码流程已完成，按配置跳过最后点击确定 type=" + type +
             (detail ? " detail=" + detail : "");
@@ -2232,6 +2236,33 @@ function createNanjingBookingCaptchaSolver(deps) {
                     stats.recognize = recognizeCost;
                     stats.captchaType = "slider";
                     failureRegion = sliderResult.region;
+
+                    if (!shouldAutoSolveSliderCaptcha()) {
+                        stats.outcome = "manual";
+                        stats.raw = "slider";
+                        stats.expression = "slider";
+                        stats.answer = "";
+                        stats.detail = sliderResult.detail;
+                        stats.reason = "slider_auto_solve_disabled";
+                        logx("滑块验证码已判定并定位成功，但配置为人工处理，跳过自动拖动 " + sliderResult.detail);
+                        try {
+                            deps.notifyUser("检测到滑块验证码，请人工拖动");
+                        } catch (ignoredSliderNotify) {}
+                        logx("验证码耗时汇总 " + captchaStatsText(stats, Date.now() - allStart));
+                        var sliderManual = {
+                            ok: false,
+                            manualFallback: true,
+                            type: "slider",
+                            reason: stats.reason,
+                            detail: sliderResult.detail,
+                            stats: stats
+                        };
+                        if (options.formalMode !== true) {
+                            sliderManual.trackProbe = trackProbe;
+                            sliderManual.sliderResult = sliderResult;
+                        }
+                        return sliderManual;
+                    }
 
                     if (typeof hooks.beforeSliderDrag === "function") {
                         var sliderProfile = activeSliderProfile();

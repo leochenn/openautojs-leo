@@ -17,7 +17,8 @@ data class BookingConfig(
     val period: String = "上午",
     val visitorCount: Int = 2,
     val startTime: String = "8:00:00.5",
-    val skipFinalSubmit: Boolean = true
+    val skipFinalSubmit: Boolean = true,
+    val autoSolveSliderCaptcha: Boolean = true
 )
 
 object AutomationScripts {
@@ -160,7 +161,8 @@ object AutomationScripts {
             period = json.optString("period", defaultConfig.period).trim(),
             visitorCount = json.optInt("visitorCount", defaultConfig.visitorCount),
             startTime = json.optString("startTime", defaultConfig.startTime).trim(),
-            skipFinalSubmit = json.optBoolean("skipFinalSubmit", defaultConfig.skipFinalSubmit)
+            skipFinalSubmit = json.optBoolean("skipFinalSubmit", defaultConfig.skipFinalSubmit),
+            autoSolveSliderCaptcha = json.optBoolean("autoSolveSliderCaptcha", defaultConfig.autoSolveSliderCaptcha)
         )
     }
 
@@ -173,6 +175,7 @@ object AutomationScripts {
             .put("visitorCount", config.visitorCount)
             .put("startTime", config.startTime)
             .put("skipFinalSubmit", config.skipFinalSubmit)
+            .put("autoSolveSliderCaptcha", config.autoSolveSliderCaptcha)
         file.writeText(json.toString(2))
     }
 
