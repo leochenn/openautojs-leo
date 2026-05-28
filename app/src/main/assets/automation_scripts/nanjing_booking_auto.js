@@ -1541,25 +1541,74 @@ function launchMiniProgram() {
     STAGE = "PREP";
     logx("NAV", "回到桌面");
     home();
-    sleep(600);
+    sleep(1200);
 
     var found = false;
+    // 提取短名字作为 OCR 备用关键词，防止桌面名字被截断
+    var k1 = CONFIG.appShortcutName.substring(0, 3); // "侵华日"
+    var k2 = CONFIG.appShortcutName.substring(0, 4); // "侵华日军"
+    var searchKeywords = [k2, k1, "侵华", "日军", "南京"];
+    
+    // 【终极防崩溃核心】：读取设备真实的安卓 API 版本号
+    // Android 11 的 API 级别为 30。低于 30 的设备直接禁用无障碍，彻底避开致命崩溃！
+    var disableAccessibility = (device.sdkInt < 30);
+    
+    if (disableAccessibility) {
+        logx("NAV", "检测到低版本系统(API " + device.sdkInt + ")，为防底层崩溃，已前置禁用无障碍控件查找，使用纯OCR模式。");
+    }
+
     for (var i = 0; i < 4; i++) {
-        var icon = text(CONFIG.appShortcutName).findOne(600);
-        if (icon) {
-            var b = icon.bounds();
-            if (b.centerX() > 0 && b.centerY() > 0 && b.centerX() < device.width && b.centerY() < device.height) {
-                var p = makePoint(b.centerX(), b.centerY(), "accessibility:desktopShortcut");
-                logx("NAV", "找到桌面快捷方式 " + pointText(p));
-                pressPoint("桌面快捷方式", p, CONFIG.pressDuration);
-                found = true;
-                break;
+        var targetPoint = null;
+        var matchedMethod = "";
+        var matchedText = "";
+
+        // ================= 方案 A：高版本设备优先尝试原生无障碍 =================
+        if (!disableAccessibility) {
+            try {
+                var icon = text(CONFIG.appShortcutName).findOne(600);
+                if (icon) {
+                    var b = icon.bounds();
+                    if (b.centerX() > 0 && b.centerY() > 0 && b.centerX() < device.width && b.centerY() < device.height) {
+                        targetPoint = makePoint(b.centerX(), b.centerY(), "accessibility:desktopShortcut");
+                        matchedMethod = "无障碍控件";
+                        matchedText = CONFIG.appShortcutName;
+                    }
+                }
+            } catch (e) {
+                // 以防万一的兜底
+                logx("NAV", "无障碍查找发生常规异常，err=" + e);
+                disableAccessibility = true; 
             }
         }
-        logx("NAV", "未找到桌面快捷方式，向左翻页 i=" + i);
+
+        // ================= 方案 B：低版本设备或 A 失败时，执行 OCR 兜底 =================
+        if (!targetPoint) {
+            var items = ocrRegion(STAGE, "查找桌面快捷方式(OCR兜底)", null);
+            var iconItem = findTextItem(items, searchKeywords, "top");
+            if (iconItem) {
+                var b2 = iconItem.bounds;
+                if (b2.centerX() > 0 && b2.centerY() > 0 && b2.centerX() < device.width && b2.centerY() < device.height) {
+                    targetPoint = makePoint(b2.centerX(), Math.max(1, b2.centerY() - scaleY(80)), "ocr:desktopShortcut");
+                    matchedMethod = "OCR文字识别";
+                    matchedText = iconItem.text;
+                }
+            }
+        }
+
+        // ================= 执行点击 =================
+        if (targetPoint) {
+            logx("NAV", "成功找到桌面快捷方式 [" + matchedMethod + "] text=" + matchedText + " " + pointText(targetPoint));
+            pressPoint("桌面快捷方式", targetPoint, CONFIG.pressDuration);
+            found = true;
+            break;
+        }
+
+        // 如果都没找到，向左翻页继续找
+        logx("NAV", "本页未找到桌面快捷方式，向左翻页 i=" + i);
         swipeLogged("桌面翻页", device.width * 0.82, device.height * 0.5, device.width * 0.18, device.height * 0.5, 450);
         sleep(800);
     }
+    
     if (!found) fail("未找到桌面快捷方式：" + CONFIG.appShortcutName);
     sleep(1500);
 }
