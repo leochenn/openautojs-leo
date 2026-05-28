@@ -205,6 +205,17 @@ function bookingConfigPath() {
     return dir + (dir.charAt(dir.length - 1) === "/" ? "" : "/") + "nanjing_booking_config.json";
 }
 
+function parseExternalBoolean(value, fallback) {
+    if (typeof value === "boolean") return value;
+    if (typeof value === "number") return value !== 0;
+    if (typeof value === "string") {
+        var normalized = value.toLowerCase().trim();
+        if (normalized === "true" || normalized === "1" || normalized === "yes") return true;
+        if (normalized === "false" || normalized === "0" || normalized === "no") return false;
+    }
+    return fallback;
+}
+
 function applyExternalBookingConfig() {
     try {
         var path = bookingConfigPath();
@@ -219,6 +230,9 @@ function applyExternalBookingConfig() {
             if (!isNaN(count)) CONFIG.visitorCount = count;
         }
         if (external.startTime !== undefined) CONFIG.startTime = String(external.startTime);
+        if (external.skipFinalSubmit !== undefined && CONFIG.captcha) {
+            CONFIG.captcha.skipFinalSubmit = parseExternalBoolean(external.skipFinalSubmit, CONFIG.captcha.skipFinalSubmit);
+        }
     } catch (ignored) {}
 }
 

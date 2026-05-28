@@ -16,7 +16,8 @@ data class BookingConfig(
     val visitDate: String = "0521",
     val period: String = "上午",
     val visitorCount: Int = 2,
-    val startTime: String = "8:00:00.5"
+    val startTime: String = "8:00:00.5",
+    val skipFinalSubmit: Boolean = true
 )
 
 object AutomationScripts {
@@ -158,7 +159,8 @@ object AutomationScripts {
             visitDate = json.optString("visitDate", defaultConfig.visitDate).trim(),
             period = json.optString("period", defaultConfig.period).trim(),
             visitorCount = json.optInt("visitorCount", defaultConfig.visitorCount),
-            startTime = json.optString("startTime", defaultConfig.startTime).trim()
+            startTime = json.optString("startTime", defaultConfig.startTime).trim(),
+            skipFinalSubmit = json.optBoolean("skipFinalSubmit", defaultConfig.skipFinalSubmit)
         )
     }
 
@@ -170,6 +172,7 @@ object AutomationScripts {
             .put("period", config.period)
             .put("visitorCount", config.visitorCount)
             .put("startTime", config.startTime)
+            .put("skipFinalSubmit", config.skipFinalSubmit)
         file.writeText(json.toString(2))
     }
 

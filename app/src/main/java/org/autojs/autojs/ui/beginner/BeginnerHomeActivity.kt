@@ -156,12 +156,14 @@ private fun BeginnerHomeScreen(
     var period by rememberSaveable { mutableStateOf(initialConfig.period) }
     var visitorCount by rememberSaveable { mutableStateOf(initialConfig.visitorCount) }
     var startTime by rememberSaveable { mutableStateOf(initialConfig.startTime) }
+    var skipFinalSubmit by rememberSaveable { mutableStateOf(initialConfig.skipFinalSubmit) }
     val config = BookingConfig(
         exhibitMode = exhibitMode,
         visitDate = visitDate.trim(),
         period = period,
         visitorCount = visitorCount,
-        startTime = startTime.trim()
+        startTime = startTime.trim(),
+        skipFinalSubmit = skipFinalSubmit
     )
     val configError = AutomationScripts.validateConfig(config)
 
@@ -273,6 +275,8 @@ private fun BeginnerHomeScreen(
                 onVisitorCountChange = { visitorCount = it },
                 startTime = startTime,
                 onStartTimeChange = { startTime = it },
+                skipFinalSubmit = skipFinalSubmit,
+                onSkipFinalSubmitChange = { skipFinalSubmit = it },
                 error = configError
             )
 
@@ -588,6 +592,8 @@ private fun ConfigCard(
     onVisitorCountChange: (Int) -> Unit,
     startTime: String,
     onStartTimeChange: (String) -> Unit,
+    skipFinalSubmit: Boolean,
+    onSkipFinalSubmitChange: (Boolean) -> Unit,
     error: String?
 ) {
     OutlinedCard(
@@ -686,6 +692,25 @@ private fun ConfigCard(
                 color = AppTextSecondary,
                 style = MaterialTheme.typography.bodySmall
             )
+
+            Text(text = "验证码确定按钮", style = MaterialTheme.typography.titleSmall)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                SelectableButton(
+                    modifier = Modifier.weight(1f),
+                    text = "跳过",
+                    selected = skipFinalSubmit,
+                    onClick = { onSkipFinalSubmitChange(true) }
+                )
+                SelectableButton(
+                    modifier = Modifier.weight(1f),
+                    text = "点击",
+                    selected = !skipFinalSubmit,
+                    onClick = { onSkipFinalSubmitChange(false) }
+                )
+            }
 
             if (error != null) {
                 Text(
