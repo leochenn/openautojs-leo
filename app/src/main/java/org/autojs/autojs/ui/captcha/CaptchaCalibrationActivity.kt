@@ -123,7 +123,6 @@ private val AppTextPrimary = Color(0xFF282C2F)
 private val AppTextSecondary = Color(0xFF6F767A)
 private val AppDivider = Color(0xFFF2F3F5)
 private val AppError = Color(0xFFFD7778)
-private val AppWarning = Color(0xFFFF9800)
 private val CardShape = RoundedCornerShape(8.dp)
 private val ButtonShape = RoundedCornerShape(4.dp)
 private const val MIN_IMAGE_SCALE = 1f
@@ -819,18 +818,6 @@ private fun FullScreenAnnotateStep(
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
                     ) {
                         Text(text = "上一步")
-                    }
-                    OutlinedButton(
-                        modifier = Modifier.weight(1f),
-                        onClick = {
-                            val key = selectedItemKey ?: return@OutlinedButton
-                            onRegionChange(key, defaultRegionForItem(key, sourceImage.bitmap))
-                        },
-                        shape = ButtonShape,
-                        border = BorderStroke(1.dp, AppWarning.copy(alpha = 0.7f)),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = AppWarning)
-                    ) {
-                        Text(text = "重置当前框")
                     }
                     if (allCompleted) {
                         Button(
