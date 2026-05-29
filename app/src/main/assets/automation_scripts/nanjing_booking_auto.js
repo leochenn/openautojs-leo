@@ -1376,11 +1376,26 @@ function estimateRushAudienceTitleY(audienceTitle) {
 function buildAudienceGestureScrollStrategy(audienceTitle) {
     var startX = Math.round(device.width * 0.5);
     var startY = Math.round(device.height * 0.78);
-    var targetY = getAudienceAlignTargetY();
+
+    // 1个观众时，目标改为"选择时段"文字Y，避免列表过短无法滑到顶部
+    var targetY;
+    var moveYMin;
+    if (CONFIG.visitorCount === 1) {
+        var periodTitle = runtime.cache.points && runtime.cache.points.periodTitle;
+        if (periodTitle) {
+            targetY = periodTitle.y;
+            moveYMin = scaleY(300);
+            logx("COORD", "1个观众模式：目标Y使用选择时段位置 " + targetY);
+        }
+    }
+    if (!targetY) {
+        targetY = getAudienceAlignTargetY();
+        moveYMin = scaleY(900);
+    }
+
     var estimatedAudienceY = estimateRushAudienceTitleY(audienceTitle);
-    var moveY = Math.round(clamp(estimatedAudienceY - targetY, scaleY(900), startY - scaleY(260)));
+    var moveY = Math.round(clamp(estimatedAudienceY - targetY, moveYMin, startY - scaleY(260)));
     var endY = Math.round(clamp(startY - moveY, scaleY(260), device.height - 1));
-    var duration = Math.round(clamp(moveY * 0.16, 220, 360));
 
     setCacheValue("audienceAlignTargetY", targetY);
     setCacheValue("scrollStrategy", {
@@ -1390,13 +1405,13 @@ function buildAudienceGestureScrollStrategy(audienceTitle) {
         startY: startY,
         endX: startX,
         endY: endY,
-        duration: 100,
+        duration: CONFIG.visitorCount === 1 ? 80 : 100,
         estimatedAudienceY: estimatedAudienceY,
         targetY: targetY,
         moveY: moveY,
         source: audienceTitle ? "audience-title-anchor" : "fallback-anchor"
     });
-    logx("COORD", "观众信息手势滚动策略 estimatedAudienceY=" + estimatedAudienceY + " targetY=" + targetY + " moveY=" + moveY + " startY=" + startY + " endY=" + endY + " duration=" + duration);
+    logx("COORD", "观众信息手势滚动策略 estimatedAudienceY=" + estimatedAudienceY + " targetY=" + targetY + " moveY=" + moveY + " startY=" + startY + " endY=" + endY + " visitorCount=" + CONFIG.visitorCount);
 }
 
 function setPeriodPointsFromTitle(titlePoint, source) {
@@ -1465,7 +1480,18 @@ function collectVisitorPoints(audienceTitle) {
     runtime.freshVisitorPoints = true;
     logx("CACHE", "visitorPrepPoints 写入 " + JSON.stringify(points));
 
-    var rushPoints = inferRushVisitorPoints(makePoint(device.width * 0.5, getAudienceAlignTargetY(), "target:audienceAfterGesture"));
+    // 1观众时使用选择时段位置作为基准，多观众时使用屏幕顶部安全区
+    var rushBaseY;
+    if (CONFIG.visitorCount === 1) {
+        var periodTitle = runtime.cache.points && runtime.cache.points.periodTitle;
+        if (periodTitle) {
+            rushBaseY = periodTitle.y;
+        }
+    }
+    if (!rushBaseY) {
+        rushBaseY = getAudienceAlignTargetY();
+    }
+    var rushPoints = inferRushVisitorPoints(makePoint(device.width * 0.5, rushBaseY, "target:audienceAfterGesture"));
     runtime.cache.visitorRushPoints = rushPoints;
     logx("CACHE", "visitorRushPoints 写入 " + JSON.stringify(rushPoints));
     return points;
