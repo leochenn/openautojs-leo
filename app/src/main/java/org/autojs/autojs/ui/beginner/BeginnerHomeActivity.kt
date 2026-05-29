@@ -12,6 +12,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -183,6 +184,7 @@ private fun BeginnerHomeScreen(
 
     var showSettingsDialog by rememberSaveable { mutableStateOf(false) }
     var isSetupExpanded by rememberSaveable { mutableStateOf(false) }
+    var showAccessibilityHelp by remember { mutableStateOf(false) }
 
     val guidePrefs = remember { context.getSharedPreferences("app_guide", Context.MODE_PRIVATE) }
     var showGuideDialog by rememberSaveable { mutableStateOf(!guidePrefs.getBoolean("hide_guide", false)) }
@@ -321,7 +323,8 @@ private fun BeginnerHomeScreen(
                     captchaDescription = captchaDescription,
                     openCaptchaCalibration = {
                         context.startActivity(Intent(context, CaptchaCalibrationActivity::class.java))
-                    }
+                    },
+                    onAccessibilityHelp = { showAccessibilityHelp = true }
                 )
             } else {
                 // 全部完成后折叠显示
@@ -381,7 +384,8 @@ private fun BeginnerHomeScreen(
                                     actionText = if (accessibilityReady) "查看设置" else "去开启",
                                     onAction = {
                                         context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                                    }
+                                    },
+                                    onHelp = { showAccessibilityHelp = true }
                                 )
                                 Divider(modifier = Modifier.padding(vertical = 8.dp))
                                 SetupStatusRow(
@@ -477,6 +481,46 @@ private fun BeginnerHomeScreen(
             }
         )
     }
+
+    if (showAccessibilityHelp) {
+        AlertDialog(
+            onDismissRequest = { showAccessibilityHelp = false },
+            confirmButton = {
+                TextButton(onClick = { showAccessibilityHelp = false }) {
+                    Text(text = "知道了", color = AppPrimary)
+                }
+            },
+            title = {
+                Text(text = "如何开启无障碍服务", fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "① 点击右侧「去开启」按钮，跳转到系统设置页",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Text(
+                        text = "② 在设置列表中找到「已安装的服务」或「无障碍」",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Text(
+                        text = "③ 找到「预约助手」，点击进入",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Text(
+                        text = "④ 打开开关，在弹出的权限确认框中点击「允许」",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Divider(color = AppDivider)
+                    Text(
+                        text = "开启后返回本页面，状态会自动更新为「已完成」。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = AppTextSecondary
+                    )
+                }
+            }
+        )
+    }
 }
 
 @Composable
@@ -553,7 +597,8 @@ private fun SetupCard(
     openInputMethodGuide: () -> Unit,
     captchaReady: Boolean,
     captchaDescription: String,
-    openCaptchaCalibration: () -> Unit
+    openCaptchaCalibration: () -> Unit,
+    onAccessibilityHelp: () -> Unit = {}
 ) {
     OutlinedCard(
         modifier = Modifier.fillMaxWidth(),
@@ -578,7 +623,8 @@ private fun SetupCard(
                 description = if (accessibilityReady) "已允许自动点击和滑动" else "脚本运行前必须开启",
                 ready = accessibilityReady,
                 actionText = if (accessibilityReady) "查看设置" else "去开启",
-                onAction = openAccessibilitySettings
+                onAction = openAccessibilitySettings,
+                onHelp = onAccessibilityHelp
             )
             Divider()
             val imeReady = imeEnabled && imeSelected
@@ -612,7 +658,8 @@ private fun SetupStatusRow(
     description: String,
     ready: Boolean,
     actionText: String,
-    onAction: () -> Unit
+    onAction: () -> Unit,
+    onHelp: (() -> Unit)? = null
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -639,6 +686,23 @@ private fun SetupStatusRow(
                 color = AppTextSecondary,
                 style = MaterialTheme.typography.bodySmall
             )
+        }
+        if (onHelp != null) {
+            Surface(
+                onClick = onHelp,
+                shape = RoundedCornerShape(50),
+                color = AppTextSecondary.copy(alpha = 0.15f),
+                modifier = Modifier.size(24.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        text = "?",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = AppTextSecondary
+                    )
+                }
+            }
         }
         OutlinedButton(
             onClick = onAction,
