@@ -1698,28 +1698,37 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawSelectionHandle
     rect: Rect,
     item: AnnotationItem
 ) {
-    val handle = 27f
+    val radius = 16f
+    val lineLen = 12f
+    val lineStroke = 3f
     val edgeColor = item.color.copy(alpha = 0.95f)
-    drawRect(
-        color = edgeColor,
-        topLeft = Offset(rect.left - handle / 2f, rect.center.y - handle / 2f),
-        size = Size(handle, handle)
-    )
-    drawRect(
-        color = edgeColor,
-        topLeft = Offset(rect.right - handle / 2f, rect.center.y - handle / 2f),
-        size = Size(handle, handle)
-    )
-    drawRect(
-        color = edgeColor,
-        topLeft = Offset(rect.center.x - handle / 2f, rect.top - handle / 2f),
-        size = Size(handle, handle)
-    )
-    drawRect(
-        color = edgeColor,
-        topLeft = Offset(rect.center.x - handle / 2f, rect.bottom - handle / 2f),
-        size = Size(handle, handle)
-    )
+    val lineColor = Color.White
+    val cx = rect.center.x
+    val cy = rect.center.y
+    // Left handle
+    val lc = Offset(rect.left, cy)
+    drawCircle(color = edgeColor, radius = radius, center = lc)
+    drawLine(lineColor, Offset(lc.x + lineLen, lc.y), Offset(lc.x - lineLen, lc.y), lineStroke)
+    drawLine(lineColor, Offset(lc.x - lineLen, lc.y), Offset(lc.x - lineLen + 5f, lc.y - 5f), lineStroke)
+    drawLine(lineColor, Offset(lc.x - lineLen, lc.y), Offset(lc.x - lineLen + 5f, lc.y + 5f), lineStroke)
+    // Right handle
+    val rc = Offset(rect.right, cy)
+    drawCircle(color = edgeColor, radius = radius, center = rc)
+    drawLine(lineColor, Offset(rc.x - lineLen, rc.y), Offset(rc.x + lineLen, rc.y), lineStroke)
+    drawLine(lineColor, Offset(rc.x + lineLen, rc.y), Offset(rc.x + lineLen - 5f, rc.y - 5f), lineStroke)
+    drawLine(lineColor, Offset(rc.x + lineLen, rc.y), Offset(rc.x + lineLen - 5f, rc.y + 5f), lineStroke)
+    // Top handle
+    val tc = Offset(cx, rect.top)
+    drawCircle(color = edgeColor, radius = radius, center = tc)
+    drawLine(lineColor, Offset(tc.x, tc.y + lineLen), Offset(tc.x, tc.y - lineLen), lineStroke)
+    drawLine(lineColor, Offset(tc.x, tc.y - lineLen), Offset(tc.x - 5f, tc.y - lineLen + 5f), lineStroke)
+    drawLine(lineColor, Offset(tc.x, tc.y - lineLen), Offset(tc.x + 5f, tc.y - lineLen + 5f), lineStroke)
+    // Bottom handle
+    val bc = Offset(cx, rect.bottom)
+    drawCircle(color = edgeColor, radius = radius, center = bc)
+    drawLine(lineColor, Offset(bc.x, bc.y - lineLen), Offset(bc.x, bc.y + lineLen), lineStroke)
+    drawLine(lineColor, Offset(bc.x, bc.y + lineLen), Offset(bc.x - 5f, bc.y + lineLen - 5f), lineStroke)
+    drawLine(lineColor, Offset(bc.x, bc.y + lineLen), Offset(bc.x + 5f, bc.y + lineLen - 5f), lineStroke)
 }
 
 // ---------------------------------------------------------------------------
