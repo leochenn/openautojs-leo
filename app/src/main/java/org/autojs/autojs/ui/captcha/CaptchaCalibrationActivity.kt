@@ -50,7 +50,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -730,12 +732,12 @@ private fun FullScreenAnnotateStep(
     var selectedItemKey by rememberSaveable { mutableStateOf<String?>(null) }
 
     // 进入时自动选中第一个未完成的区域，或第一个区域
-    var showGuide by rememberSaveable { mutableStateOf(true) }
-    LaunchedEffect(sourceImage) {
-        if (sourceImage != null) {
-            delay(2000)
-            showGuide = false
-        }
+    val prefs = remember { context.getSharedPreferences("captcha_calibration", Context.MODE_PRIVATE) }
+    var showInstructionDialog by rememberSaveable { mutableStateOf(!prefs.getBoolean("hide_instruction_dialog", false)) }
+    var dontShowAgain by remember { mutableStateOf(false) }
+    fun dismissInstructionDialog() {
+        if (dontShowAgain) prefs.edit().putBoolean("hide_instruction_dialog", true).apply()
+        showInstructionDialog = false
     }
     LaunchedEffect(type.key) {
         val firstMissing = items.firstOrNull { regions[it.key]?.isValid != true }
@@ -853,26 +855,83 @@ private fun FullScreenAnnotateStep(
                 }
             }
         }
-        // 引导浮层
-        if (showGuide) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clickable { showGuide = false },
-                contentAlignment = Alignment.Center
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = Color.Black.copy(alpha = 0.75f)
-                ) {
-                    Text(
-                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
-                        text = "点击彩色框开始调整位置",
-                        color = Color.White,
-                        style = MaterialTheme.typography.bodyMedium
-                    )
+        // 使用指南对话框
+        if (showInstructionDialog) {
+            AlertDialog(
+                onDismissRequest = { dismissInstructionDialog() },
+                confirmButton = {
+                    TextButton(onClick = { dismissInstructionDialog() }) {
+                        Text(text = "知道了", color = AppPrimary)
+                    }
+                },
+                title = {
+                    Text(text = "标注指南", fontWeight = FontWeight.Bold)
+                },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(
+                            text = "操作方法",
+                            fontWeight = FontWeight.SemiBold,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Text(
+                            text = "① 点击左侧标签或直接点击彩色框选中\n" +
+                                "② 拖动框中间区域 → 移动位置\n" +
+                                "③ 拖动边缘圆形手柄 → 调整大小\n" +
+                                "④ 双指捏合/张开 → 缩放图片",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = AppTextSecondary
+                        )
+                        Divider(color = AppDivider)
+                        Text(
+                            text = "各框应放置的位置",
+                            fontWeight = FontWeight.SemiBold,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        val guides = if (type.key == TYPE_MATH) listOf(
+                            "表达式" to "覆盖包含数学算式的文字区域（如 3+5=?）",
+                            "输入框" to "覆盖用户输入答案的输入框",
+                            "确定" to "覆盖「确定」或「提交」按钮"
+                        ) else listOf(
+                            "灰块" to "覆盖需要识别的灰块拼图区域",
+                            "箭头" to "覆盖可拖动的滑块箭头",
+                            "轨道" to "覆盖滑块滑动的轨道",
+                            "确定" to "覆盖「确定」按钮（如无可忽略）"
+                        )
+                        guides.forEach { (label, desc) ->
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                Text(
+                                    text = label,
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.width(36.dp)
+                                )
+                                Text(
+                                    text = desc,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = AppTextSecondary
+                                )
+                            }
+                        }
+                        Divider(color = AppDivider)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = dontShowAgain,
+                                onCheckedChange = { dontShowAgain = it }
+                            )
+                            Text(
+                                text = "下次不再提示",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
                 }
-            }
+            )
         }
     }
 }

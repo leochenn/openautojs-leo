@@ -24,8 +24,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -181,6 +183,14 @@ private fun BeginnerHomeScreen(
 
     var showSettingsDialog by rememberSaveable { mutableStateOf(false) }
     var isSetupExpanded by rememberSaveable { mutableStateOf(false) }
+
+    val guidePrefs = remember { context.getSharedPreferences("app_guide", Context.MODE_PRIVATE) }
+    var showGuideDialog by rememberSaveable { mutableStateOf(!guidePrefs.getBoolean("hide_guide", false)) }
+    var guideDontShowAgain by remember { mutableStateOf(false) }
+    fun dismissGuideDialog() {
+        if (guideDontShowAgain) guidePrefs.edit().putBoolean("hide_guide", true).apply()
+        showGuideDialog = false
+    }
 
     Scaffold(
         containerColor = Color.White,
@@ -411,6 +421,59 @@ private fun BeginnerHomeScreen(
             onLogUpload = {
                 showSettingsDialog = false
                 openLogUpload()
+            }
+        )
+    }
+
+    if (showGuideDialog) {
+        AlertDialog(
+            onDismissRequest = { dismissGuideDialog() },
+            confirmButton = {
+                TextButton(onClick = { dismissGuideDialog() }) {
+                    Text(text = "我知道了", color = AppPrimary)
+                }
+            },
+            title = {
+                Text(text = "抢票使用指南", fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "准备工作",
+                        fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    GuideStep("1", "打开微信小程序，点击右上角菜单「…」，选择「添加到桌面」创建快捷方式。将快捷方式与本应用放在同一屏幕上，方便脚本自动启动。")
+                    GuideStep("2", "准备两张不同类型的验证码截图素材（在本设备上截取）。\n\n截取技巧：首次抢票前先录屏，在预约详情页点击「确定」后弹出验证码，取消后再点「确定」，直到出现第二种类型的验证码弹窗，从录屏中截取两种验证码的截图。")
+                    GuideStep("3", "提前运行脚本。例如 17:00 开始抢票，可设置抢票时间为 17:00:00.5，然后提前 3 分钟左右启动脚本等待。")
+                    GuideStep("4", "运行脚本前，先手动杀死微信小程序进程（从最近任务中清除），脚本会自动重新打开小程序。")
+                    Divider(color = AppDivider)
+                    Text(
+                        text = "⚠️ 重要提醒",
+                        fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = AppError
+                    )
+                    Text(
+                        text = "小程序可能会定期更新验证码布局，届时需要重新截图并调整标注区域。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = AppTextSecondary
+                    )
+                    Divider(color = AppDivider)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = guideDontShowAgain,
+                            onCheckedChange = { guideDontShowAgain = it }
+                        )
+                        Text(
+                            text = "下次不再提示",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
             }
         )
     }
@@ -781,6 +844,33 @@ private fun SelectableButton(
         ) {
             Text(text = text)
         }
+    }
+}
+
+@Composable
+private fun GuideStep(number: String, text: String) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        Surface(
+            shape = RoundedCornerShape(50),
+            color = AppPrimary,
+            modifier = Modifier.size(20.dp)
+        ) {
+            Text(
+                text = number,
+                color = Color.White,
+                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.padding(top = 2.dp),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+        }
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodySmall,
+            color = AppTextPrimary
+        )
     }
 }
 
