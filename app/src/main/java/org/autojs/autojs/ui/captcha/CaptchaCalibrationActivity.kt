@@ -901,10 +901,16 @@ private fun FullScreenAnnotateStep(
                         Text(
                             text = "① 点击左侧标签或直接点击彩色框选中\n" +
                                 "② 拖动框中间区域 → 移动位置\n" +
-                                "③ 拖动边缘圆形手柄 → 调整大小\n" +
+                                "③ 拖动边缘 → 调整大小\n" +
                                 "④ 双指捏合/张开 → 缩放图片",
                             style = MaterialTheme.typography.bodySmall,
                             color = AppTextSecondary
+                        )
+                        Text(
+                            text = "💡 标注框较小时，双指放大画布后再操作会更精准",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = AppPrimary,
+                            fontWeight = FontWeight.SemiBold
                         )
                         Divider(color = AppDivider)
                         Text(
@@ -2265,35 +2271,35 @@ private fun regionEditModeForOffset(
     rect: Rect,
     offset: Offset
 ): RegionEditMode {
-    val handleSize = 27f
+    val shortSide = minOf(rect.width, rect.height)
+    val handleSize = shortSide.coerceIn(27f, 50f)
     val half = handleSize / 2f
-    val outwardExtend = 60f
-    val alongPad = 10f
-    // Handle hit areas: visual handle + large outward extension
+    val outwardExtend = handleSize * 2.5f
+    // Small box: edge strips only extend outward, interior is all Move
+    // Large box: edge strips extend both inward and outward
+    val smallBox = shortSide < 80f
+    val inwardExtend = if (smallBox) 0f else half
+    val leftHandle = Rect(rect.left - half - outwardExtend, rect.top, rect.left + inwardExtend, rect.bottom)
+    val rightHandle = Rect(rect.right - inwardExtend, rect.top, rect.right + half + outwardExtend, rect.bottom)
+    val topHandle = Rect(rect.left, rect.top - half - outwardExtend, rect.right, rect.top + inwardExtend)
+    val bottomHandle = Rect(rect.left, rect.bottom - inwardExtend, rect.right, rect.bottom + half + outwardExtend)
     val cx = rect.center.x
     val cy = rect.center.y
-    val leftHandle = Rect(rect.left - half - outwardExtend, cy - half - alongPad, rect.left + half, cy + half + alongPad)
-    val rightHandle = Rect(rect.right - half, cy - half - alongPad, rect.right + half + outwardExtend, cy + half + alongPad)
-    val topHandle = Rect(cx - half - alongPad, rect.top - half - outwardExtend, cx + half + alongPad, rect.top + half)
-    val bottomHandle = Rect(cx - half - alongPad, rect.bottom - half, cx + half + alongPad, rect.bottom + half + outwardExtend)
-    // Find closest handle that contains the touch point
     var bestMode = RegionEditMode.None
     var bestDist = Float.MAX_VALUE
-    fun checkHandle(handleRect: Rect, mode: RegionEditMode) {
+    fun checkHandle(handleRect: Rect, edgeCenter: Offset, mode: RegionEditMode) {
         if (!handleRect.contains(offset)) return
-        val center = handleRect.center
-        val dist = kotlin.math.abs(offset.x - center.x) + kotlin.math.abs(offset.y - center.y)
+        val dist = kotlin.math.abs(offset.x - edgeCenter.x) + kotlin.math.abs(offset.y - edgeCenter.y)
         if (dist < bestDist) {
             bestDist = dist
             bestMode = mode
         }
     }
-    checkHandle(leftHandle, RegionEditMode.ResizeLeft)
-    checkHandle(rightHandle, RegionEditMode.ResizeRight)
-    checkHandle(topHandle, RegionEditMode.ResizeTop)
-    checkHandle(bottomHandle, RegionEditMode.ResizeBottom)
+    checkHandle(leftHandle, Offset(rect.left, cy), RegionEditMode.ResizeLeft)
+    checkHandle(rightHandle, Offset(rect.right, cy), RegionEditMode.ResizeRight)
+    checkHandle(topHandle, Offset(cx, rect.top), RegionEditMode.ResizeTop)
+    checkHandle(bottomHandle, Offset(cx, rect.bottom), RegionEditMode.ResizeBottom)
     if (bestMode != RegionEditMode.None) return bestMode
-    // Anywhere else inside the box → move
     if (rect.contains(offset)) return RegionEditMode.Move
     return RegionEditMode.None
 }

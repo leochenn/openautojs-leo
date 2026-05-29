@@ -466,6 +466,12 @@ private fun BeginnerHomeScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = AppTextSecondary
                     )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "脚本按固定流程执行，每一步操作流程都是固定的，但小程序的实际加载速度受网络状况和手机性能影响。例如页面跳转通常只需 0.5 秒，网络不佳时可能延迟数秒，这会导致脚本操作与页面不同步。所以不是每次都会成功",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = AppTextSecondary
+                    )
                     Divider(color = AppDivider)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(
