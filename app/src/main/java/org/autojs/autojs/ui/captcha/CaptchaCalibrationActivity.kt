@@ -28,6 +28,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -775,11 +779,9 @@ private fun FullScreenAnnotateStep(
             onSelectedItemChange = { selectedItemKey = it }
         )
 
-        // 左侧步骤指示器
+        // 左侧步骤指示器（可拖动）
         StepIndicator(
-            modifier = Modifier
-                .align(Alignment.CenterStart)
-                .padding(start = 6.dp),
+            modifier = Modifier.align(Alignment.TopStart),
             items = items,
             selectedItemKey = selectedItemKey,
             regions = regions,
@@ -1266,8 +1268,16 @@ private fun StepIndicator(
     regions: Map<String, CaptchaRegion>,
     onSelectedItemChange: (String) -> Unit
 ) {
+    var dragOffset by remember { mutableStateOf(Offset(8f, 40f)) }
     Surface(
-        modifier = modifier,
+        modifier = modifier
+            .offset { IntOffset(dragOffset.x.roundToInt(), dragOffset.y.roundToInt()) }
+            .draggable(
+                state = rememberDraggableState { delta ->
+                    dragOffset = dragOffset.copy(y = (dragOffset.y + delta).coerceIn(0f, 800f))
+                },
+                orientation = Orientation.Vertical
+            ),
         shape = RoundedCornerShape(8.dp),
         color = Color.Black.copy(alpha = 0.7f)
     ) {
@@ -1277,10 +1287,11 @@ private fun StepIndicator(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             items.forEachIndexed { index, item ->
-                val completed = regions[item.key]?.isValid == true
                 val selected = item.key == selectedItemKey
+                val completed = regions[item.key]?.isValid == true
                 Column(
                     modifier = Modifier
+                        .defaultMinSize(minWidth = 44.dp)
                         .clickable { onSelectedItemChange(item.key) }
                         .background(
                             color = when {
@@ -1294,7 +1305,7 @@ private fun StepIndicator(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = if (completed) "✓" else "${index + 1}",
+                        text = if (selected) "✓" else "${index + 1}",
                         color = Color.White,
                         fontSize = MaterialTheme.typography.labelSmall.fontSize,
                         fontWeight = FontWeight.Bold
