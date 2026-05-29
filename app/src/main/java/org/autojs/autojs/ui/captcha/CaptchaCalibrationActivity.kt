@@ -54,6 +54,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -99,6 +100,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import com.stardust.autojs.execution.ScriptExecution
 import org.autojs.autojs.model.automation.AutomationScripts
 import org.autojs.autojs.model.automation.CaptchaCalibrationProfile
@@ -735,6 +738,7 @@ private fun FullScreenAnnotateStep(
     val prefs = remember { context.getSharedPreferences("captcha_calibration", Context.MODE_PRIVATE) }
     var showInstructionDialog by rememberSaveable { mutableStateOf(!prefs.getBoolean("hide_instruction_dialog", false)) }
     var dontShowAgain by remember { mutableStateOf(false) }
+    var showExampleImage by rememberSaveable { mutableStateOf(false) }
     fun dismissInstructionDialog() {
         if (dontShowAgain) prefs.edit().putBoolean("hide_instruction_dialog", true).apply()
         showInstructionDialog = false
@@ -788,6 +792,26 @@ private fun FullScreenAnnotateStep(
             regions = regions,
             onSelectedItemChange = { selectedItemKey = it }
         )
+
+        // 右上角帮助按钮
+        Surface(
+            onClick = { showInstructionDialog = true },
+            shape = RoundedCornerShape(50),
+            color = Color.Black.copy(alpha = 0.7f),
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = 48.dp, end = 12.dp)
+                .size(32.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Text(
+                    text = "?",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp
+                )
+            }
+        }
 
         // 底部操作栏
         Surface(
@@ -916,6 +940,17 @@ private fun FullScreenAnnotateStep(
                                 )
                             }
                         }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        OutlinedButton(
+                            onClick = {
+                                dismissInstructionDialog()
+                                showExampleImage = true
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = ButtonShape
+                        ) {
+                            Text(text = "查看标注示例图")
+                        }
                         Divider(color = AppDivider)
                         Row(
                             verticalAlignment = Alignment.CenterVertically
@@ -932,6 +967,56 @@ private fun FullScreenAnnotateStep(
                     }
                 }
             )
+        }
+
+        // 标注示例图全屏弹窗
+        if (showExampleImage) {
+            val exampleRes = if (type.key == TYPE_MATH)
+                R.drawable.captcha_example_math else R.drawable.captcha_example_slider
+            val exampleTitle = if (type.key == TYPE_MATH) "数学验证码标注示例" else "滑块验证码标注示例"
+            Dialog(onDismissRequest = { showExampleImage = false }) {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = Color.Black
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = exampleTitle,
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.titleMedium,
+                                modifier = Modifier.weight(1f)
+                            )
+                            IconButton(onClick = { showExampleImage = false }) {
+                                Text(text = "✕", color = Color.White, fontSize = 20.sp)
+                            }
+                        }
+                        Image(
+                            painter = painterResource(id = exampleRes),
+                            contentDescription = exampleTitle,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                            contentScale = ContentScale.Fit
+                        )
+                        Text(
+                            text = "按示例调整各框的位置和大小",
+                            color = Color.White.copy(alpha = 0.7f),
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(vertical = 16.dp)
+                        )
+                    }
+                }
+            }
         }
     }
 }
