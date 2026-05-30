@@ -2164,20 +2164,94 @@ function createNanjingBookingCaptchaSolver(deps) {
     }
 
     function solveCaptchaCore(inputImg, hooks, options) {
-        hooks = hooks || {};
-        options = options || {};
+        var skipWait = options.skipInitialWait === true;
         var allStart = Date.now();
         var stats = newCaptchaStats();
         runtime.captchaStats = stats;
         clearMathCaptchaInputPrefocus();
-        var skipWait = options.skipInitialWait === true;
+        
+        var waitCost = 0;
+
         if (!skipWait) {
-            logx("验证码阶段开始，等待弹窗渲染 " + CONFIG.afterConfirmCaptchaWaitMs + "ms");
-            sleep(CONFIG.afterConfirmCaptchaWaitMs);
+            logx("验证码阶段开始，先强制等待 200ms 避开弹窗升起动画...");
+            sleep(200);
+            logx("开始动态轮询等待确定按钮出现...");
+            var pollStart = Date.now();
+            var buttonAppeared = false;
+            
+            // 新增：内存循环计数器，完全不消耗性能
+            var loopCount = 0; 
+            
+            // 提取校准文件中的 数学/滑块 确定按钮区域
+            var mathProfile = activeMathProfile();
+            var sliderProfile = activeSliderProfile();
+            var mathBtnRegion = mathProfile ? normalizeProfileRegion(mathProfile.submitRegion, "mathBtn", true) : null;
+            var sliderBtnRegion = sliderProfile ? normalizeProfileRegion(sliderProfile.submitRegion, "sliderBtn", true) : null;
+
+            // 如果都没有校准，给一个兜底的屏幕中下方探测区域 (高度在 1800~2400 之间)
+            var fallbackRegion = { x: 0, y: scaleY(1800), w: device.width, h: scaleY(600) };
+
+            // === 内部极速多点找色函数（不负责截图，只负责在一张图上找色） ===
+            function isColorBlockInRegion(imgObj, reg, colorStr) {
+                if (!reg) return false;
+                var offsetX = Math.round(clamp(reg.x || reg[0], 0, device.width - 1));
+                var offsetY = Math.round(clamp(reg.y || reg[1], 0, device.height - 1));
+                var w = Math.round(clamp(reg.w || reg[2], 1, device.width - offsetX));
+                var h = Math.round(clamp(reg.h || reg[3], 1, device.height - offsetY));
+                
+                var shapeOffsets = [ [15, 0, colorStr], [0, 15, colorStr], [15, 15, colorStr], [25, 25, colorStr] ];
+                var p = images.findMultiColors(imgObj, colorStr, shapeOffsets, {
+                    region: [offsetX, offsetY, w, h],
+                    threshold: 15 // 严格容差
+                });
+                return !!p;
+            }
+
+            // 最长等 2.5 秒弹窗
+            while (Date.now() - pollStart < 2500) {
+                loopCount++; // 每次循环计数 +1
+                var found = false;
+                
+                // 【核心性能优化】：每轮循环只截一次图！
+                var probeImg = captureScreen();
+                
+                // 拿着这张图，依次扫视各个区域
+                if (mathBtnRegion && isColorBlockInRegion(probeImg, mathBtnRegion, "#A87D6C")) {
+                    found = true;
+                } else if (sliderBtnRegion && isColorBlockInRegion(probeImg, sliderBtnRegion, "#A87D6C")) {
+                    found = true;
+                } else if (!mathBtnRegion && !sliderBtnRegion && isColorBlockInRegion(probeImg, fallbackRegion, "#A87D6C")) {
+                    found = true;
+                }
+                
+                // 用完立刻回收这轮的截图内存
+                try { probeImg.recycle(); } catch(e) {}
+
+                if (found) {
+                    buttonAppeared = true;
+                    break;
+                }
+                sleep(10); // 10ms极速轮询
+            }
+
+            var appearCost = Date.now() - pollStart;
+            // 计算单次循环的平均耗时
+            var avgLoopTime = loopCount > 0 ? Math.round(appearCost / loopCount) : 0;
+
+            if (buttonAppeared) {
+                // 【升级】：完美输出性能统计日志
+                logx("验证码确定按钮已出现 elapsed=" + appearCost + "ms 探测次数=" + loopCount + "次 单次探测平均耗时=" + avgLoopTime + "ms");
+                logx("按策略追加 200ms 等待图片渲染...");
+                sleep(200); 
+                waitCost = Date.now() - pollStart;
+            } else {
+                logx("警告：等待 2500ms 确定按钮仍未出现 elapsed=" + appearCost + "ms 探测次数=" + loopCount + "次，强制继续执行后续流程");
+                waitCost = 2500;
+            }
         } else {
             logx("验证码模拟阶段开始，跳过弹窗等待");
         }
-        var waitCost = Date.now() - allStart;
+        
         stats.wait = waitCost;
 
         var img = null;
@@ -2189,6 +2263,7 @@ function createNanjingBookingCaptchaSolver(deps) {
         var inputCost = 0;
         var regions = buildExpressionRegions();
         var failureRegion = regions.length ? regions[0] : scaledRegion(CONFIG.captcha.expressionRegion);
+
         try {
             if (inputImg) {
                 img = inputImg;

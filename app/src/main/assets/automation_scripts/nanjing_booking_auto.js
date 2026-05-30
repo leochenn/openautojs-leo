@@ -1172,6 +1172,7 @@ function detectColorBlockInRegion(region, colorStr, threshold) {
         if (img) { try { img.recycle(); } catch (e) {} }
     }
 }
+runtime.detectColorBlockInRegion = detectColorBlockInRegion;
 
 // ==================== 页面坐标采集与推算 ====================
 function getHomeExhibitPoint() {
