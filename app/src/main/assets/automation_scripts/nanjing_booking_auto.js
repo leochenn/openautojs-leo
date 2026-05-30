@@ -1112,6 +1112,67 @@ function waitForText(label, keywords, region, timeoutMs) {
     return null;
 }
 
+function detectTextInRegion(region, keyword) {
+    var img = null;
+    var ocrImg = null;
+    try {
+        img = captureScreen();
+        var offsetX = Math.round(clamp(region[0], 0, device.width - 1));
+        var offsetY = Math.round(clamp(region[1], 0, device.height - 1));
+        var w = Math.round(clamp(region[2], 1, device.width - offsetX));
+        var h = Math.round(clamp(region[3], 1, device.height - offsetY));
+        ocrImg = images.clip(img, offsetX, offsetY, w, h);
+        var result = gmlkit.ocr(ocrImg, "zh");
+        var arr = result.toArray(3);
+        for (var i = 0; i < arr.length; i++) {
+            if (arr[i] && arr[i].text && fuzzyContains(arr[i].text, keyword)) {
+                return true;
+            }
+        }
+        return false;
+    } catch (e) {
+        return false;
+    } finally {
+        if (ocrImg && ocrImg !== img) { try { ocrImg.recycle(); } catch (e) {} }
+        if (img) { try { img.recycle(); } catch (e) {} }
+    }
+}
+
+// === 新增：严格的实心色块检测 ===
+function detectColorBlockInRegion(region, colorStr, threshold) {
+    var img = null;
+    try {
+        img = captureScreen();
+        var offsetX = Math.round(clamp(region[0], 0, device.width - 1));
+        var offsetY = Math.round(clamp(region[1], 0, device.height - 1));
+        var w = Math.round(clamp(region[2], 1, device.width - offsetX));
+        var h = Math.round(clamp(region[3], 1, device.height - offsetY));
+        
+        // 【核心防御】：定义色块的形状特征 (相对第一个找到的点的偏移量)
+        // 只有当起始点，以及它右侧、下方、右下方 15~25 像素全都是相同颜色时，才判定为“方框”。
+        // 文字的笔画很细，一旦向右或向下偏移 15 个像素，一定会戳到白色背景上，从而被完美过滤。
+        var shapeOffsets = [
+            [15, 0, colorStr],   // 向右 15 像素也是棕色
+            [0, 15, colorStr],   // 向下 15 像素也是棕色
+            [15, 15, colorStr],  // 右下 15 像素也是棕色
+            [25, 25, colorStr]   // 右下 25 像素也是棕色
+        ];
+
+        // 使用 findMultiColors (多点找色) 代替 findColor (单点找色)
+        var p = images.findMultiColors(img, colorStr, shapeOffsets, {
+            region: [offsetX, offsetY, w, h],
+            threshold: threshold || 20
+        });
+        
+        return !!p; // 如果找到了符合上述所有特征的像素群，才返回 true
+    } catch (e) {
+        logx("COLOR", "色块检测异常 err=" + e);
+        return false;
+    } finally {
+        if (img) { try { img.recycle(); } catch (e) {} }
+    }
+}
+
 // ==================== 页面坐标采集与推算 ====================
 function getHomeExhibitPoint() {
     var cached = getCachedPoint("homeExhibit");
@@ -1993,7 +2054,38 @@ function rushFlow() {
     runtime.logBuffer = [];
 
     pressPoint("普通预约", getNormalBookingPoint(), CONFIG.fastPressDuration);
-    sleep(650);
+
+    // 等待"参观日期"被选中的状态背景色出现，最多2秒；未出现则说明加载异常，中断流程
+    var pageLoadDetectStart = Date.now();
+    // 检测区域覆盖"参观日期"网格，包含 南京 和 正义必胜 的高度范围
+    var dateDetectRegion = [0, scaleY(800), device.width, scaleY(600)];
+    var pageLoadDetected = false;
+    
+    // 新增：内存循环计数器，完全不消耗性能
+    var loopCount = 0; 
+    sleep(350); 
+    while (Date.now() - pageLoadDetectStart < 2000) {
+        loopCount++; // 每次循环计数 +1
+        if (detectColorBlockInRegion(dateDetectRegion, "#A87D6C", 15)) { // 容差设为15，更严谨
+            pageLoadDetected = true;
+            break;
+        }
+        sleep(10); 
+    }
+
+    var elapsed = Date.now() - pageLoadDetectStart;
+    
+    if (!pageLoadDetected) {
+        flushLogBuffer();
+        logx("RUSH", "日期选中色块未在1.5秒内出现，中断流程 elapsed=" + elapsed + "ms loopCount=" + loopCount);
+        return { ok: false, pageLoadTimeout: true, reason: "日期选中色块未出现 elapsed=" + elapsed + "ms" };
+    }
+    
+    // 新增：计算单次循环的平均耗时（刨除最初始的 150ms 纯等待）
+    var avgLoopTime = loopCount > 0 ? Math.round((elapsed - 150) / loopCount) : 0;
+    
+    // 升级日志：输出 总耗时、总循环次数、单次循环平均耗时
+    logx("RUSH", "日期选中色块已出现 elapsed=" + elapsed + "ms 探测次数=" + loopCount + "次 单次探测平均耗时=" + avgLoopTime + "ms");
 
     var datePoint = getCachedPoint("targetDate");
     if (!datePoint) datePoint = collectDatePoint();
@@ -2098,7 +2190,9 @@ function main() {
         }
         waitUntilStartTime();
         var rushResult = rushFlow();
-        if (rushResult && rushResult.manualFallback) {
+        if (rushResult && rushResult.pageLoadTimeout) {
+            finalNotifyUser("页面加载超时，流程已中断：" + rushResult.reason);
+        } else if (rushResult && rushResult.manualFallback) {
             finalNotifyUser("验证码已保留现场，等待人工兜底，请查看日志");
         } else {
             finalNotifyUser("预约脚本正常结束，请查看日志");
