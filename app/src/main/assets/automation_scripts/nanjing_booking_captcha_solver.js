@@ -2242,7 +2242,7 @@ function createNanjingBookingCaptchaSolver(deps) {
                 // 【升级】：完美输出性能统计日志
                 logx("验证码确定按钮已出现 elapsed=" + appearCost + "ms 探测次数=" + loopCount + "次 单次探测平均耗时=" + avgLoopTime + "ms");
                 logx("按策略追加 200ms 等待图片渲染...");
-                sleep(200); 
+                sleep(50); 
                 waitCost = Date.now() - pollStart;
             } else {
                 logx("警告：等待 2500ms 确定按钮仍未出现 elapsed=" + appearCost + "ms 探测次数=" + loopCount + "次，强制继续执行后续流程");

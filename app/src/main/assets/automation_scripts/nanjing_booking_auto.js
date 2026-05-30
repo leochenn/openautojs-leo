@@ -42,7 +42,7 @@ var CONFIG = {
         enabled: true,
         moduleFileName: "nanjing_booking_captcha_solver.js",
         preloadMinLeadMs: 3000,
-        saveSceneBeforeSolve: true, // true 时在验证码识别/处理前保存一张现场全屏截图；默认关闭，避免影响正式抢票链路
+        saveSceneBeforeSolve: false, // true 时在验证码识别/处理前保存一张现场全屏截图；默认关闭，避免影响正式抢票链路
         expressionRegion: { x: 455, y: 1160, w: 570, h: 200 },
         expressionRegions: [
             { name: "mockLargeText", x: 455, y: 1160, w: 570, h: 200, templateEnabled: true },
@@ -2091,7 +2091,7 @@ function rushFlow() {
     var datePoint = getCachedPoint("targetDate");
     if (!datePoint) datePoint = collectDatePoint();
     pressPoint("目标日期 " + CONFIG.visitDate, datePoint, CONFIG.fastPressDuration);
-    sleep(120);
+    sleep(180);
 
     var periodPoint = getPeriodPoint();
     pressPoint("选择时段 " + CONFIG.period, periodPoint, CONFIG.fastPressDuration);
