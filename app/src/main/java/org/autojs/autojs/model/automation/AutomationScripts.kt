@@ -10,12 +10,16 @@ import java.util.GregorianCalendar
 
 const val EXHIBIT_MODE_NANJING = "nanjing"
 const val EXHIBIT_MODE_JUSTICE = "justice"
+const val BOOKING_TYPE_NORMAL = "normal"
+const val BOOKING_TYPE_PARENT = "parent"
 
 data class BookingConfig(
     val exhibitMode: String = EXHIBIT_MODE_NANJING,
+    val bookingType: String = BOOKING_TYPE_NORMAL,
     val visitDate: String = "0521",
     val period: String = "上午",
     val visitorCount: Int = 2,
+    val minorVisitorCount: Int = 1,
     val startTime: String = "8:00:00.5",
     val skipFinalSubmit: Boolean = true,
     val autoSolveSliderCaptcha: Boolean = true
@@ -121,6 +125,9 @@ object AutomationScripts {
         if (config.exhibitMode != EXHIBIT_MODE_NANJING && config.exhibitMode != EXHIBIT_MODE_JUSTICE) {
             return "展馆只能选择南京或正义必胜"
         }
+        if (config.bookingType != BOOKING_TYPE_NORMAL && config.bookingType != BOOKING_TYPE_PARENT) {
+            return "预约类型只能选择普通或亲子"
+        }
         if (!Regex("^\\d{4}$").matches(config.visitDate)) {
             return "参观日期必须是 4 位 MMDD，例如 0521"
         }
@@ -138,7 +145,17 @@ object AutomationScripts {
         if (config.period != "上午" && config.period != "下午") {
             return "参观时段只能选择上午或下午"
         }
-        if (config.visitorCount !in 1..5) {
+        if (config.bookingType == BOOKING_TYPE_PARENT) {
+            if (config.visitorCount !in 1..4) {
+                return "亲子预约成年人人数必须在 1 到 4 之间"
+            }
+            if (config.minorVisitorCount < 1) {
+                return "亲子预约未成年人个数至少为 1"
+            }
+            if (config.visitorCount + config.minorVisitorCount > 5) {
+                return "亲子预约总人数最多 5 人"
+            }
+        } else if (config.visitorCount !in 1..5) {
             return "参观人数必须在 1 到 5 之间"
         }
         val match = Regex("^(\\d{1,2}):(\\d{2}):(\\d{2})(?:\\.(\\d{1,3}))?$")
@@ -157,9 +174,12 @@ object AutomationScripts {
         return BookingConfig(
             exhibitMode = json.optString("exhibitMode", defaultConfig.exhibitMode).trim()
                 .ifEmpty { defaultConfig.exhibitMode },
+            bookingType = json.optString("bookingType", defaultConfig.bookingType).trim()
+                .ifEmpty { defaultConfig.bookingType },
             visitDate = json.optString("visitDate", defaultConfig.visitDate).trim(),
             period = json.optString("period", defaultConfig.period).trim(),
             visitorCount = json.optInt("visitorCount", defaultConfig.visitorCount),
+            minorVisitorCount = json.optInt("minorVisitorCount", defaultConfig.minorVisitorCount),
             startTime = json.optString("startTime", defaultConfig.startTime).trim(),
             skipFinalSubmit = json.optBoolean("skipFinalSubmit", defaultConfig.skipFinalSubmit),
             autoSolveSliderCaptcha = json.optBoolean("autoSolveSliderCaptcha", defaultConfig.autoSolveSliderCaptcha)
@@ -170,9 +190,11 @@ object AutomationScripts {
         file.parentFile?.mkdirs()
         val json = JSONObject()
             .put("exhibitMode", config.exhibitMode)
+            .put("bookingType", config.bookingType)
             .put("visitDate", config.visitDate)
             .put("period", config.period)
             .put("visitorCount", config.visitorCount)
+            .put("minorVisitorCount", config.minorVisitorCount)
             .put("startTime", config.startTime)
             .put("skipFinalSubmit", config.skipFinalSubmit)
             .put("autoSolveSliderCaptcha", config.autoSolveSliderCaptcha)

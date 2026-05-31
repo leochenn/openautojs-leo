@@ -9,9 +9,11 @@
 var CONFIG = {
     appShortcutName: "侵华日军南京大屠杀遇难同胞纪念馆参观预约", // 桌面快捷方式名称；第一轮启动小程序时用于无障碍查找图标
     exhibitMode: "nanjing", // 可选："nanjing"、"justice"；旧配置缺失时默认南京展馆
+    bookingType: "normal", // 可选："normal"、"parent"；parent 表示亲子预约
     visitDate: "0521", // MMDD，例如 0505；日期网格按当前周周日到下周六两行显示
     period: "上午", // 可选："上午"、"下午"
-    visitorCount: 2, // 1-5
+    visitorCount: 2, // 普通预约为总人数 1-5；亲子预约为成年人人数 1-4
+    minorVisitorCount: 1, // 亲子预约未成年人个数，至少 1，成人+未成年人最多 5
     startTime: "8:00:00.5", // 第二轮正式抢票触发时间；支持 HH:mm:ss 或 HH:mm:ss.SSS，已过该时间时会在第一轮后立即执行第二轮
     prepareOnly: false, // true 时只执行第一轮，不等待 startTime，也不执行第二轮
     useCache: true, // 是否读取已有坐标缓存；第一轮关键采集项仍会由 preferRealtimeInPrepare 控制而优先实时刷新
@@ -26,6 +28,10 @@ var CONFIG = {
     pressDuration: 20, // 常规点击按压时长；用于第一轮采集、登录、弹窗等非极速链路
     fastPressDuration: 10, // 第二轮普通预约、日期、时段、确认按钮的快速点击按压时长；越小越快但过低可能丢点击
     visitorPressDuration: 50, // 第二轮勾选游客的专用按压时长；游客列表在滚动容器内，单独加长以提高点击生效率
+    parentAdultPressDuration: 120, // 亲子成年人区独立按压时长，不影响普通预约
+    parentAdultAfterScrollMs: 1000, // 亲子成年人区拖顶后的稳定等待，不影响普通预约
+    parentMinorPressDuration: 120, // 亲子未成年人区在第二次大幅滚动后更容易吞短点击，单独加长按压时长
+    parentMinorAfterScrollMs: 1000, // 亲子未成年人区滚动后的稳定等待；只影响需要第二次拖动的场景
     afterAudienceScrollMs: 700, // 第二轮滑动到观众信息后的等待时间；等 WebView/小程序滚动停稳后再点游客，这个值会影响滑动后的点击
     visitorIntervalMs: 80, // 第二轮连续勾选多个游客之间的间隔；避免游客卡片状态更新时吞掉后续点击
     afterConfirmCaptchaWaitMs: 800, // 第二轮点击确认预约后等待验证码弹窗渲染的时间；与 Mock 测试脚本保持一致
@@ -148,7 +154,9 @@ var EXHIBIT_PROFILES = {
         fallbackVisitorStartY: 2050,
         fallbackEstimatedAudienceTitleY: 2350,
         cachePath: "/sdcard/OpenAutoJS_NanjingBooking/nanjing_booking_cache.json",
-        backupCachePath: "/sdcard/nanjing_booking_cache.json"
+        backupCachePath: "/sdcard/nanjing_booking_cache.json",
+        parentCachePath: "/sdcard/OpenAutoJS_NanjingBooking/nanjing_booking_parent_cache.json",
+        parentBackupCachePath: "/sdcard/nanjing_booking_parent_cache.json"
     },
     justice: {
         id: "justice",
@@ -166,9 +174,23 @@ var EXHIBIT_PROFILES = {
         fallbackVisitorStartY: 2150,
         fallbackEstimatedAudienceTitleY: 2450,
         cachePath: "/sdcard/OpenAutoJS_NanjingBooking/nanjing_booking_justice_cache.json",
-        backupCachePath: "/sdcard/nanjing_booking_justice_cache.json"
+        backupCachePath: "/sdcard/nanjing_booking_justice_cache.json",
+        parentCachePath: "/sdcard/OpenAutoJS_NanjingBooking/nanjing_booking_justice_parent_cache.json",
+        parentBackupCachePath: "/sdcard/nanjing_booking_justice_parent_cache.json"
     }
 };
+
+function isParentBookingMode() {
+    return CONFIG.bookingType === "parent";
+}
+
+function currentBookingTypeName() {
+    return isParentBookingMode() ? "亲子预约" : "普通预约";
+}
+
+function currentBookingCacheType() {
+    return isParentBookingMode() ? "parent" : "normal";
+}
 
 function currentExhibitProfile() {
     return EXHIBIT_PROFILES[CONFIG.exhibitMode] || EXHIBIT_PROFILES.nanjing;
@@ -182,8 +204,13 @@ function applyCurrentExhibitProfile() {
         fullTitle: profile.fullTitle,
         homeCardIndex: profile.homeCardIndex
     };
-    CONFIG.cachePath = profile.cachePath;
-    CONFIG.backupCachePath = profile.backupCachePath;
+    if (isParentBookingMode()) {
+        CONFIG.cachePath = profile.parentCachePath;
+        CONFIG.backupCachePath = profile.parentBackupCachePath;
+    } else {
+        CONFIG.cachePath = profile.cachePath;
+        CONFIG.backupCachePath = profile.backupCachePath;
+    }
 }
 
 function bookingConfigScriptDir() {
@@ -224,11 +251,16 @@ function applyExternalBookingConfig() {
         var external = JSON.parse(files.read(path));
         if (!external) return;
         if (external.exhibitMode !== undefined) CONFIG.exhibitMode = String(external.exhibitMode);
+        if (external.bookingType !== undefined) CONFIG.bookingType = String(external.bookingType);
         if (external.visitDate !== undefined) CONFIG.visitDate = String(external.visitDate);
         if (external.period !== undefined) CONFIG.period = String(external.period);
         if (external.visitorCount !== undefined) {
             var count = parseInt(external.visitorCount, 10);
             if (!isNaN(count)) CONFIG.visitorCount = count;
+        }
+        if (external.minorVisitorCount !== undefined) {
+            var minorCount = parseInt(external.minorVisitorCount, 10);
+            if (!isNaN(minorCount)) CONFIG.minorVisitorCount = minorCount;
         }
         if (external.startTime !== undefined) CONFIG.startTime = String(external.startTime);
         if (external.skipFinalSubmit !== undefined && CONFIG.captcha) {
@@ -821,6 +853,12 @@ function loadCache() {
         if (cache.exhibitMode && cache.exhibitMode !== CONFIG.exhibitMode) {
             logx("CACHE", "缓存展馆模式不一致，跳过旧缓存 cache=" + cache.exhibitMode + " current=" + CONFIG.exhibitMode);
             cache = {};
+        } else {
+            var cacheBookingType = cache.bookingType || "normal";
+            if (cacheBookingType !== currentBookingCacheType()) {
+                logx("CACHE", "缓存预约类型不一致，跳过旧缓存 cache=" + cacheBookingType + " current=" + currentBookingCacheType());
+                cache = {};
+            }
         }
     }
 
@@ -842,6 +880,10 @@ function saveCache() {
     runtime.cache.version = CONFIG.version;
     runtime.cache.exhibitMode = CONFIG.exhibitMode;
     runtime.cache.exhibitName = currentExhibitProfile().shortName;
+    runtime.cache.bookingType = currentBookingCacheType();
+    runtime.cache.bookingTypeName = currentBookingTypeName();
+    runtime.cache.visitorCount = CONFIG.visitorCount;
+    runtime.cache.minorVisitorCount = CONFIG.minorVisitorCount;
     runtime.cache.screen = { width: device.width, height: device.height };
     runtime.cache.collectedAt = nowText();
     var ok = writeJson(runtime.cachePath, runtime.cache);
@@ -879,8 +921,11 @@ function shouldSkipCacheInPrepare(key) {
         targetDate: true,
         homeExhibit: true,
         normalBooking: true,
+        parentBooking: true,
         visitDateTitle: true,
         audienceTitle: true,
+        adultTitle: true,
+        minorTitle: true,
         periodTitle: true,
         periodMorning: true,
         periodAfternoon: true,
@@ -919,26 +964,34 @@ function logRushPlan(reason) {
             visitDate: CONFIG.visitDate,
             period: CONFIG.period,
             visitorCount: CONFIG.visitorCount,
+            minorVisitorCount: CONFIG.minorVisitorCount,
             startTime: CONFIG.startTime,
             exhibitMode: CONFIG.exhibitMode,
-            exhibitName: currentExhibitProfile().shortName
+            exhibitName: currentExhibitProfile().shortName,
+            bookingType: currentBookingCacheType(),
+            bookingTypeName: currentBookingTypeName()
         },
         screen: { width: device.width, height: device.height },
         points: {
             normalBooking: cachePointForPlan("normalBooking"),
+            parentBooking: cachePointForPlan("parentBooking"),
             targetDate: cachePointForPlan("targetDate"),
             period: cachePointForPlan(periodKey),
             confirmBooking: cachePointForPlan("confirmBooking")
         },
         visitorRushPoints: runtime.cache.visitorRushPoints || null,
+        adultRushPoints: runtime.cache.adultRushPoints || null,
+        minorRushPoints: runtime.cache.minorRushPoints || null,
         scrollStrategy: runtime.cache.scrollStrategy || null,
+        adultScrollStrategy: runtime.cache.adultScrollStrategy || null,
+        minorScrollStrategy: runtime.cache.minorScrollStrategy || null,
         cachePath: runtime.cachePath,
         collectedAt: runtime.cache.collectedAt || null
     };
     logx("PLAN", "二轮执行计划 " + JSON.stringify(plan));
     warnRiskyPoint("targetDate", plan.points.targetDate);
     warnRiskyPoint("period", plan.points.period);
-    warnRiskyPoint("normalBooking", plan.points.normalBooking);
+    warnRiskyPoint(isParentBookingMode() ? "parentBooking" : "normalBooking", isParentBookingMode() ? plan.points.parentBooking : plan.points.normalBooking);
     warnRiskyPoint("confirmBooking", plan.points.confirmBooking);
 }
 
@@ -978,6 +1031,8 @@ function fuzzyContains(text, keyword) {
     if (k === "确认预约") return t.indexOf("确认") >= 0 && t.indexOf("预约") >= 0;
     if (k === "普通预约") return t.indexOf("普通") >= 0 && t.indexOf("预约") >= 0;
     if (k === "普通预约标题") return t.indexOf("普通") >= 0;
+    if (k === "亲子预约") return t.indexOf("亲子") >= 0 && t.indexOf("预约") >= 0;
+    if (k === "亲子预约标题") return t.indexOf("亲子") >= 0;
     if (k === "用户确认登录") return t.indexOf("用户") >= 0 && t.indexOf("登录") >= 0;
     if (k === "南京大屠杀") return t.indexOf("南京") >= 0 && t.indexOf("屠杀") >= 0;
     if (k === "正义必胜") return t.indexOf("正义") >= 0 && t.indexOf("必胜") >= 0;
@@ -987,6 +1042,31 @@ function fuzzyContains(text, keyword) {
     if (k === "审判日本战犯") return t.indexOf("审判") >= 0 && (t.indexOf("日本") >= 0 || t.indexOf("战犯") >= 0);
     if (k === "参观日期") return t.indexOf("参观") >= 0 && t.indexOf("日期") >= 0;
     if (k === "观众信息") return t.indexOf("观众") >= 0 && t.indexOf("信息") >= 0;
+    if (k === "成人信息") {
+        var looksLikeMinor = t.indexOf("未成年") >= 0 || t.indexOf("末成年") >= 0 || t.indexOf("来成年") >= 0 || t.indexOf("米成年") >= 0;
+        return !looksLikeMinor && (
+            t.indexOf("成年人信息") >= 0 ||
+            t.indexOf("年人信息") >= 0 ||
+            t.indexOf("人信息") >= 0 ||
+            t.indexOf("人信") >= 0 ||
+            t === "信息" ||
+            t.indexOf("戍年人") >= 0 ||
+            t.indexOf("咸年人") >= 0
+        );
+    }
+    if (k === "未成年人信息") {
+        return t.indexOf("信息") >= 0 && (
+            t.indexOf("未成年") >= 0 ||
+            t.indexOf("末成年") >= 0 ||
+            t.indexOf("来成年") >= 0 ||
+            t.indexOf("米成年") >= 0
+        );
+    }
+    if (k === "证件类型") {
+        if (t.indexOf("证件号码") >= 0 || t.indexOf("号码") >= 0) return false;
+        if (t.indexOf("计算方式") >= 0 || t.indexOf("出生日期") >= 0) return false;
+        return t.indexOf("证件类型") >= 0 || t.indexOf("正件类型") >= 0 || t.indexOf("件类型") >= 0;
+    }
     if (k === "选择时段") return t.indexOf("选择") >= 0 && t.indexOf("时段") >= 0;
     if (k === "我已知晓" || k === "已知晓" || k === "知晓") return t.indexOf("知晓") >= 0 || (t.indexOf("知") >= 0 && t.indexOf("晓") >= 0);
     return false;
@@ -1262,7 +1342,7 @@ function collectBookingListSentinelPoint(region) {
 
 function waitBookingListSentinelGone(point) {
     var firstDelayMs = 50;
-    var afterGoneWaitMs = 100;
+    var afterGoneWaitMs = 150;
     var timeoutMs = 1600;
     var intervalMs = 25;
     if (!point) {
@@ -1380,6 +1460,33 @@ function getNormalBookingPoint() {
     setCachedPoint("normalBooking", fallback);
     collectBookingListSentinelPoint(region);
     return fallback;
+}
+
+function getParentBookingPoint() {
+    var cached = getCachedPoint("parentBooking");
+    if (cached) return cached;
+
+    var region = [0, scaleY(700), device.width, scaleY(1700)];
+    var p = findPointByText("亲子预约", "亲子预约", region, "top");
+    if (p) {
+        setCachedPoint("parentBooking", p);
+        collectBookingListSentinelPoint(region);
+        return p;
+    }
+
+    var fallback = scaledPoint("parentBookingCard", 720, 1660);
+    setCachedPoint("parentBooking", fallback);
+    collectBookingListSentinelPoint(region);
+    return fallback;
+}
+
+function getBookingEntryPoint() {
+    if (isParentBookingMode()) {
+        // 登录探测仍使用普通预约入口，亲子模式第一轮也缓存普通入口供探测复用。
+        getNormalBookingPoint();
+        return getParentBookingPoint();
+    }
+    return getNormalBookingPoint();
 }
 
 function getConfirmButtonPoint() {
@@ -1519,7 +1626,7 @@ function collectBookingTitleAnchor() {
     var cached = getCachedPoint("bookingTitle");
     if (cached) return cached;
 
-    var title = findPointByText("预约详情页标题", "普通预约标题", [0, scaleY(120), device.width, scaleY(260)], "top");
+    var title = findPointByText("预约详情页标题", isParentBookingMode() ? "亲子预约标题" : "普通预约标题", [0, scaleY(120), device.width, scaleY(260)], "top");
     if (title) {
         setCachedPoint("bookingTitle", title);
         setCacheValue("bookingTitleAnchorY", Math.round(title.y));
@@ -1746,6 +1853,476 @@ function scrollToAudienceForRush() {
     } else {
         swipeLogged("滑动到观众信息", scrollStrategy.startX, scrollStrategy.startY, scrollStrategy.endX, scrollStrategy.endY, scrollStrategy.duration);
     }
+}
+
+function makeGestureScrollStep(name, startX, startY, endX, endY, duration, source) {
+    return {
+        name: name,
+        type: "gesture",
+        startX: Math.round(startX),
+        startY: Math.round(startY),
+        endX: Math.round(endX),
+        endY: Math.round(endY),
+        duration: duration,
+        source: source || "computed"
+    };
+}
+
+function runScrollStep(label, step) {
+    if (!step) return;
+    if (step.type === "swipe") {
+        swipeLogged(label + "-" + (step.name || "swipe"), step.startX, step.startY, step.endX, step.endY, step.duration);
+    } else {
+        gestureLogged(label + "-" + (step.name || "gesture"), step.startX, step.startY, step.endX, step.endY, step.duration);
+    }
+}
+
+function runScrollStrategy(label, strategy) {
+    if (!strategy) return;
+    if (strategy.steps && strategy.steps.length) {
+        for (var i = 0; i < strategy.steps.length; i++) {
+            runScrollStep(label, strategy.steps[i]);
+            sleep(80);
+        }
+        return;
+    }
+    runScrollStep(label, strategy);
+}
+
+function parentTitleAlignMinEndY() {
+    return scaleY(180);
+}
+
+function buildTitleAlignStep(titlePoint, name, source) {
+    if (!titlePoint) return null;
+    var targetY = getAudienceAlignTargetY();
+    var deltaY = Math.round(titlePoint.y - targetY);
+    var startX = Math.round(device.width * 0.5);
+    var startY = Math.round(device.height * 0.78);
+    if (Math.abs(deltaY) <= scaleY(35)) {
+        return makeGestureScrollStep(name + "Noop", startX, startY, startX, startY, 1, source || "already-aligned");
+    }
+    var endY = Math.round(clamp(startY - deltaY, parentTitleAlignMinEndY(), device.height - scaleY(180)));
+    return makeGestureScrollStep(name, startX, startY, startX, endY, 180, source || "title-anchor");
+}
+
+function alignTitleToTopForPrepare(titlePoint, name, source) {
+    var step = buildTitleAlignStep(titlePoint, name, source);
+    if (!step) return null;
+    if (step.duration > 1) {
+        runScrollStep("第一轮标题拖顶", step);
+        sleep(700);
+    }
+    return step;
+}
+
+function findAllTextItems(items, keywords) {
+    var matched = [];
+    for (var i = 0; i < items.length; i++) {
+        if (fuzzyContains(items[i].text, keywords)) matched.push(items[i]);
+    }
+    matched.sort(function(a, b) {
+        return itemRect(a).cy - itemRect(b).cy;
+    });
+    return matched;
+}
+
+function collectPersonCardPointsFromCredentialRows(sectionName, requiredCount) {
+    var points = collectVisibleCredentialRowPoints(sectionName);
+    if (points.length < requiredCount) {
+        logx("WARN", sectionName + "证件类型行数量不足 required=" + requiredCount + " actual=" + points.length + "，将按已识别行距补足");
+        var gap = scaleY(365);
+        var nextY = points.length > 0 ? points[points.length - 1].y + gap : getAudienceAlignTargetY() + scaleY(520);
+        while (points.length < requiredCount && points.length < 5) {
+            points.push(makePoint(scaleX(700), nextY, "infer:" + sectionName + "CredentialRowFallback:" + (points.length + 1)));
+            nextY += gap;
+        }
+    }
+    return points;
+}
+
+function visiblePersonAreaRegion() {
+    var top = scaleY(250);
+    var bottomReserved = scaleY(260);
+    return [0, top, device.width, Math.max(scaleY(900), device.height - top - bottomReserved)];
+}
+
+function collectVisibleCredentialRowPoints(sectionName) {
+    var items = ocrRegion(STAGE, "采集" + sectionName + "证件类型行", visiblePersonAreaRegion());
+    var rows = findAllTextItems(items, "证件类型");
+    var points = [];
+    for (var i = 0; i < rows.length && points.length < 5; i++) {
+        var r = itemRect(rows[i]);
+        if (r.cy < scaleY(320) || r.cy > device.height - scaleY(260)) continue;
+        points.push(makePoint(scaleX(700), r.cy, "ocr:" + sectionName + "CredentialRow:" + (points.length + 1)));
+        logx("COORD", sectionName + "证件类型行 text=" + rows[i].text + " rect=" + JSON.stringify(simpleRectFromItem(rows[i])) + " clickY=" + r.cy);
+    }
+    return points;
+}
+
+function assertCurrentParentSection(sectionName) {
+    var items = ocrRegion(STAGE, "确认当前亲子人员区-" + sectionName, [0, scaleY(250), device.width, Math.floor(device.height * 0.48)]);
+    var adult = findTextItem(items, "成人信息", "top");
+    var minor = findTextItem(items, "未成年人信息", "top");
+    if (sectionName === "adult" && minor) {
+        logx("WARN", "当前页面已到未成年人信息区，不能采集 adult 点，疑似成年人标题拖顶过量");
+        return false;
+    }
+    if (sectionName === "adult" && !adult) {
+        logx("WARN", "当前页面未确认成年人信息标题，adult 点采集风险高");
+    }
+    if (sectionName === "minor" && !minor) {
+        logx("WARN", "当前页面未确认未成年人信息标题，minor 点采集风险高");
+        return false;
+    }
+    return true;
+}
+
+function buildParentAdultRushScrollStrategy(adultTitle) {
+    var startX = Math.round(device.width * 0.5);
+    var startY = Math.round(device.height * 0.78);
+    var targetY = getAudienceAlignTargetY();
+    var insertedPeriodOffsetY = isPreparePeriodVisibleLayout() ? 0 : scaleY(420);
+    var estimatedAdultY;
+    var source;
+    if (adultTitle) {
+        estimatedAdultY = Math.round(adultTitle.y + insertedPeriodOffsetY);
+        source = insertedPeriodOffsetY > 0 ? "adult-title-anchor-period-inserted" : "adult-title-anchor";
+    } else if (runtime.cache.adultTitleRect && runtime.cache.adultTitleRect.cy) {
+        estimatedAdultY = Math.round(runtime.cache.adultTitleRect.cy + insertedPeriodOffsetY);
+        source = insertedPeriodOffsetY > 0 ? "adult-title-rect-period-inserted" : "adult-title-rect";
+    } else {
+        estimatedAdultY = scaleY(currentExhibitProfile().fallbackEstimatedAudienceTitleY);
+        source = "fallback-anchor";
+    }
+    var moveY = Math.max(0, Math.round(estimatedAdultY - targetY));
+    var endY = Math.round(clamp(startY - moveY, parentTitleAlignMinEndY(), device.height - scaleY(180)));
+    return {
+        name: "adultAnchorGesture",
+        type: "gesture",
+        startX: startX,
+        startY: startY,
+        endX: startX,
+        endY: endY,
+        duration: 180,
+        estimatedAdultY: estimatedAdultY,
+        targetY: targetY,
+        moveY: moveY,
+        insertedPeriodOffsetY: insertedPeriodOffsetY,
+        prepareDetailLayoutMode: runtime.cache.prepareDetailLayoutMode,
+        source: source
+    };
+}
+
+function buildParentMinorRushScrollStrategy(minorTitle, source) {
+    var step = buildTitleAlignStep(minorTitle, "minorAnchorGesture", source || (minorTitle && minorTitle.source) || "minor-title-anchor");
+    if (!step) return null;
+    if (step.duration > 1) step.duration = 260;
+    step.estimatedMinorY = minorTitle ? Math.round(minorTitle.y) : null;
+    step.targetY = getAudienceAlignTargetY();
+    step.moveY = minorTitle ? Math.max(0, Math.round(minorTitle.y - step.targetY)) : null;
+    return step;
+}
+
+function estimateMinorTitleAfterAdultTop() {
+    var adultPoints = runtime.cache.adultRushPoints || runtime.cache.adultPrepPoints || [];
+    var lastAdult = adultPoints.length > 0 ? adultPoints[Math.min(CONFIG.visitorCount, adultPoints.length) - 1] : null;
+    var estimatedY = lastAdult ? lastAdult.y + scaleY(435) : getAudienceAlignTargetY() + scaleY(1500);
+    var title = makePoint(scaleX(300), estimatedY, "infer:minorTitleFromAdultRows:" + CONFIG.visitorCount);
+    setCachedPoint("minorTitle", title);
+    setCacheValue("minorTitleRect", {
+        left: title.x - scaleX(220),
+        top: title.y - scaleY(35),
+        right: title.x + scaleX(220),
+        bottom: title.y + scaleY(35),
+        width: scaleX(440),
+        height: scaleY(70),
+        cx: title.x,
+        cy: title.y
+    });
+    logx("COORD", "成年人拖顶后未成年人信息标题估算 " + pointText(title) + (lastAdult ? " basisLastAdultY=" + lastAdult.y : " basis=fallback"));
+    return title;
+}
+
+function collectAdultSectionPointsForPrepare(adultTitle) {
+    setCacheValue("adultScrollStrategy", buildParentAdultRushScrollStrategy(adultTitle));
+    alignTitleToTopForPrepare(adultTitle, "adultTitleAlign", "prep-adult-title");
+    if (!assertCurrentParentSection("adult")) {
+        fail("成年人信息拖顶后已进入未成年人区，停止写入错误成人缓存");
+    }
+
+    var visiblePoints = collectVisibleCredentialRowPoints("parentVisibleAfterAdult");
+    var adultPoints = visiblePoints.slice(0, CONFIG.visitorCount);
+    if (adultPoints.length < CONFIG.visitorCount) {
+        logx("WARN", "成人区可见证件类型行不足，将补足 adult 点 required=" + CONFIG.visitorCount + " actual=" + adultPoints.length);
+        adultPoints = collectPersonCardPointsFromCredentialRows("adult", CONFIG.visitorCount).slice(0, CONFIG.visitorCount);
+    }
+    runtime.cache.adultPrepPoints = adultPoints;
+    runtime.cache.adultRushPoints = adultPoints;
+    runtime.freshVisitorPoints = true;
+    logx("CACHE", "adultPrepPoints 写入 " + JSON.stringify(adultPoints));
+    logx("CACHE", "adultRushPoints 写入 " + JSON.stringify(adultPoints));
+
+    var totalNeeded = CONFIG.visitorCount + CONFIG.minorVisitorCount;
+    if (visiblePoints.length >= totalNeeded) {
+        var minorPoints = visiblePoints.slice(CONFIG.visitorCount, totalNeeded);
+        runtime.cache.minorPrepPoints = minorPoints;
+        runtime.cache.minorRushPoints = minorPoints;
+        setCacheValue("minorScrollStrategy", {
+            name: "minorAlreadyVisibleAfterAdult",
+            type: "gesture",
+            startX: Math.round(device.width * 0.5),
+            startY: Math.round(device.height * 0.78),
+            endX: Math.round(device.width * 0.5),
+            endY: Math.round(device.height * 0.78),
+            duration: 1,
+            source: "visible-after-adult"
+        });
+        setCacheValue("minorAlreadyCollectedAfterAdult", true);
+        logx("CACHE", "成年人拖顶后已采够成人+未成年人，跳过未成年人第二次拖动 totalVisible=" + visiblePoints.length + " totalNeeded=" + totalNeeded);
+        logx("CACHE", "minorPrepPoints 写入 " + JSON.stringify(minorPoints));
+        logx("CACHE", "minorRushPoints 写入 " + JSON.stringify(minorPoints));
+    } else {
+        setCacheValue("minorAlreadyCollectedAfterAdult", false);
+        logx("CACHE", "成年人拖顶后未采够全部亲子观众，后续继续拖动未成年人区 totalVisible=" + visiblePoints.length + " totalNeeded=" + totalNeeded);
+    }
+    return adultPoints;
+}
+
+function collectParentAudienceAndPeriodPoints() {
+    collectBookingTitleAnchor();
+
+    var detailRegionTop = scaleY(850);
+    var detailRegionBottom = Math.floor(device.height * 0.9);
+    var detailItems = ocrRegion(STAGE, "查找 选择时段与成人信息标题", [0, detailRegionTop, device.width, detailRegionBottom - detailRegionTop]);
+    var periodItem = findTextItem(detailItems, "选择时段", "top");
+    var morningTimeItem = findTextItem(detailItems, "08:30-12:30", "left");
+    var afternoonTimeItem = findTextItem(detailItems, "12:30-16:30", "right");
+    var adultItem = findTextItem(detailItems, "成人信息", "top");
+    var periodTitle = null;
+    var adultTitle = null;
+    var adultRect = null;
+    var morningTimeRect = null;
+    var afternoonTimeRect = null;
+
+    if (periodItem) {
+        periodTitle = centerOfBounds(periodItem.bounds, "ocr:选择时段标题");
+        setCachedPoint("periodTitle", periodTitle);
+        setCacheValue("periodTitleRect", simpleRectFromItem(periodItem));
+        logx("OCR", "亲子选择时段标题 匹配 text=" + periodItem.text + " " + pointText(periodTitle));
+    }
+    if (morningTimeItem) morningTimeRect = simpleRectFromItem(morningTimeItem);
+    if (afternoonTimeItem) afternoonTimeRect = simpleRectFromItem(afternoonTimeItem);
+    if (adultItem) {
+        adultTitle = centerOfBounds(adultItem.bounds, "ocr:成人信息标题");
+        adultRect = simpleRectFromItem(adultItem);
+        setCachedPoint("adultTitle", adultTitle);
+        setCacheValue("adultTitleRect", adultRect);
+        logx("OCR", "成人信息标题 匹配 text=" + adultItem.text + " " + pointText(adultTitle) + " rect=" + JSON.stringify(adultRect));
+    } else {
+        logx("OCR", "成人信息标题 未匹配");
+    }
+
+    if (periodTitle || morningTimeRect || afternoonTimeRect) {
+        setCacheValue("prepareDetailLayoutMode", "period-visible");
+        if (periodTitle) {
+            setPeriodPointsFromTitle(periodTitle, "ocr-prep-parent-period-visible");
+        } else {
+            setPeriodPointsFromTimeRects(morningTimeRect, afternoonTimeRect, "ocr-prep-parent-period-time-visible");
+        }
+    } else if (adultRect) {
+        setCacheValue("prepareDetailLayoutMode", "period-hidden");
+        setPeriodPointsFromAudienceRect(adultRect, "infer-parent-from-adult-title");
+    } else {
+        setCacheValue("prepareDetailLayoutMode", "fallback-period-title");
+        var profile = currentExhibitProfile();
+        var inferredTitle = makePoint(scaleX(220), scaleY(profile.fallbackPeriodTitleY), "infer:parentPeriodTitleFromOpenedLayout:" + profile.id);
+        setCachedPoint("periodTitle", inferredTitle);
+        setPeriodPointsFromTitle(inferredTitle, "infer-parent-from-screenshot-layout");
+    }
+
+    collectAdultSectionPointsForPrepare(adultTitle);
+    if (runtime.cache.minorAlreadyCollectedAfterAdult === true) {
+        logx("FLOW", "未成年人点已在成年人拖顶后采集完成，跳过未成年人区拖动采集");
+    } else {
+        collectMinorVisitorPointsForPrepare();
+    }
+    getConfirmButtonPoint();
+}
+
+function collectAdultVisitorPoints(adultTitle) {
+    var existing = runtime.cache.adultPrepPoints;
+    if (!(CONFIG.preferRealtimeInPrepare && STAGE === "PREP") && CONFIG.useCache && runtime.cache.__screenMatched && existing && existing.length >= CONFIG.visitorCount) {
+        logx("CACHE", "adultPrepPoints 命中 count=" + existing.length);
+        return existing;
+    }
+
+    var startY = adultTitle ? adultTitle.y + scaleY(420) : scaleY(currentExhibitProfile().fallbackVisitorStartY);
+    var points = [];
+    var gap = scaleY(365);
+    for (var i = 0; i < 5; i++) {
+        points.push(makePoint(scaleX(190), startY + i * gap, "infer:adultList:" + (i + 1)));
+    }
+    runtime.cache.adultPrepPoints = points;
+    runtime.freshVisitorPoints = true;
+    logx("CACHE", "adultPrepPoints 写入 " + JSON.stringify(points));
+
+    var targetY = getAudienceAlignTargetY();
+    var rushPoints = inferAdultRushPoints(makePoint(device.width * 0.5, targetY, "target:adultAfterGesture"));
+    runtime.cache.adultRushPoints = rushPoints;
+    logx("CACHE", "adultRushPoints 写入 " + JSON.stringify(rushPoints));
+    return points;
+}
+
+function inferAdultRushPoints(adultTitle) {
+    var firstY = adultTitle ? adultTitle.y + scaleY(420) : scaleY(830);
+    var gap = scaleY(365);
+    var points = [];
+    for (var i = 0; i < 5; i++) {
+        points.push(makePoint(scaleX(190), firstY + i * gap, "infer:rushAdultPostScroll:" + (i + 1)));
+    }
+    return points;
+}
+
+function buildAdultGestureScrollStrategy(adultTitle) {
+    var startX = Math.round(device.width * 0.5);
+    var startY = Math.round(device.height * 0.78);
+    var targetY = getAudienceAlignTargetY();
+    var estimatedAdultY = adultTitle ? Math.round(adultTitle.y) : scaleY(currentExhibitProfile().fallbackEstimatedAudienceTitleY);
+    var moveY = Math.round(clamp(estimatedAdultY - targetY, scaleY(650), startY - scaleY(260)));
+    var endY = Math.round(clamp(startY - moveY, scaleY(260), device.height - 1));
+    setCacheValue("adultScrollStrategy", {
+        name: "adultAnchorGesture",
+        type: "gesture",
+        startX: startX,
+        startY: startY,
+        endX: startX,
+        endY: endY,
+        duration: 100,
+        estimatedAdultY: estimatedAdultY,
+        targetY: targetY,
+        moveY: moveY,
+        source: adultTitle ? "adult-title-anchor" : "fallback-anchor"
+    });
+    buildMinorGestureScrollStrategy(targetY);
+}
+
+function buildMinorGestureScrollStrategy(adultTargetY) {
+    var startX = Math.round(device.width * 0.5);
+    var startY = Math.round(device.height * 0.78);
+    var adultExtra = Math.max(0, CONFIG.visitorCount - 1) * scaleY(365);
+    var moveY = Math.round(clamp(scaleY(520) + adultExtra, scaleY(420), startY - scaleY(260)));
+    var endY = Math.round(clamp(startY - moveY, scaleY(260), device.height - 1));
+    setCacheValue("minorScrollStrategy", {
+        name: "minorAnchorGesture",
+        type: "gesture",
+        startX: startX,
+        startY: startY,
+        endX: startX,
+        endY: endY,
+        duration: 120,
+        adultTargetY: adultTargetY,
+        moveY: moveY,
+        source: "adult-count-estimate"
+    });
+}
+
+function findMinorTitleOnCurrentPage(label) {
+    var items = ocrRegion(STAGE, label, visiblePersonAreaRegion());
+    var item = findTextItem(items, "未成年人信息", "top");
+    if (!item) return null;
+    var title = centerOfBounds(item.bounds, "ocr:未成年人信息标题");
+    setCachedPoint("minorTitle", title);
+    setCacheValue("minorTitleRect", simpleRectFromItem(item));
+    logx("OCR", "未成年人信息标题 匹配 text=" + item.text + " " + pointText(title));
+    return title;
+}
+
+function collectMinorVisitorPointsForPrepare() {
+    var title = findMinorTitleOnCurrentPage("查找未成年人信息标题-成人拖顶后");
+    if (!title) title = estimateMinorTitleAfterAdultTop();
+
+    var strategy = buildParentMinorRushScrollStrategy(title, title.source.indexOf("infer:") === 0 ? "minor-title-estimated-after-adult" : "minor-title-visible-after-adult");
+    setCacheValue("minorScrollStrategy", strategy);
+    if (strategy && strategy.duration > 1) {
+        runScrollStep("第一轮标题拖顶", strategy);
+        sleep(700);
+    }
+
+    if (!assertCurrentParentSection("minor")) {
+        fail("未成年人信息拖顶后未确认进入未成年人区，停止写入错误未成年人缓存");
+    }
+    var prepPoints = collectPersonCardPointsFromCredentialRows("minor", CONFIG.minorVisitorCount);
+    runtime.cache.minorPrepPoints = prepPoints;
+    runtime.cache.minorRushPoints = prepPoints;
+    runtime.freshVisitorPoints = true;
+    logx("CACHE", "minorPrepPoints 写入 " + JSON.stringify(prepPoints));
+    logx("CACHE", "minorRushPoints 写入 " + JSON.stringify(runtime.cache.minorRushPoints));
+    return prepPoints;
+}
+
+function inferMinorRushPoints(minorTitle) {
+    var firstY = minorTitle ? minorTitle.y + scaleY(300) : scaleY(760);
+    var gap = scaleY(365);
+    var points = [];
+    for (var i = 0; i < 5; i++) {
+        points.push(makePoint(scaleX(190), firstY + i * gap, "infer:rushMinorPostScroll:" + (i + 1)));
+    }
+    return points;
+}
+
+function scrollToAdultForRush() {
+    var strategy = runtime.cache.adultScrollStrategy || runtime.cache.scrollStrategy || {
+        name: "adultAnchorGestureFallback",
+        type: "gesture",
+        startX: Math.round(device.width * 0.5),
+        startY: Math.round(device.height * 0.78),
+        endX: Math.round(device.width * 0.5),
+        endY: Math.round(device.height * 0.22),
+        duration: 180,
+        source: "default-screen-ratio"
+    };
+    runScrollStrategy("滑动到成年人信息", strategy);
+    return strategy;
+}
+
+function scrollToMinorForRush() {
+    var strategy = runtime.cache.minorScrollStrategy || {
+        name: "minorAnchorGestureFallback",
+        type: "gesture",
+        startX: Math.round(device.width * 0.5),
+        startY: Math.round(device.height * 0.78),
+        endX: Math.round(device.width * 0.5),
+        endY: Math.round(device.height * 0.28),
+        duration: 180,
+        source: "default-screen-ratio"
+    };
+    runScrollStrategy("滑动到未成年人信息", strategy);
+    return strategy;
+}
+
+function getAdultPointsForRush() {
+    if (runtime.cache.adultRushPoints && runtime.cache.adultRushPoints.length >= CONFIG.visitorCount && (runtime.cache.__screenMatched || runtime.freshVisitorPoints)) {
+        logx("CACHE", "adultRushPoints 命中 count=" + runtime.cache.adultRushPoints.length);
+        return runtime.cache.adultRushPoints;
+    }
+    var points = collectPersonCardPointsFromCredentialRows("adult-rush", CONFIG.visitorCount);
+    runtime.cache.adultRushPoints = points;
+    runtime.freshVisitorPoints = true;
+    logx("CACHE", "adultRushPoints 实时OCR写入 " + JSON.stringify(points));
+    return points;
+}
+
+function getMinorPointsForRush() {
+    if (runtime.cache.minorRushPoints && runtime.cache.minorRushPoints.length >= CONFIG.minorVisitorCount && (runtime.cache.__screenMatched || runtime.freshVisitorPoints)) {
+        logx("CACHE", "minorRushPoints 命中 count=" + runtime.cache.minorRushPoints.length);
+        return runtime.cache.minorRushPoints;
+    }
+    var points = collectPersonCardPointsFromCredentialRows("minor-rush", CONFIG.minorVisitorCount);
+    runtime.cache.minorRushPoints = points;
+    runtime.freshVisitorPoints = true;
+    logx("CACHE", "minorRushPoints 实时OCR写入 " + JSON.stringify(points));
+    return points;
 }
 
 // ==================== 页面识别与流程动作 ====================
@@ -1988,12 +2565,12 @@ function waitForBookingPageOnly(timeoutMs) {
         }
         sleep(CONFIG.pageWaitInterval);
     }
-    logx("PAGE", "等待普通预约详情页超时 cost=" + (Date.now() - start) + "ms");
+    logx("PAGE", "等待" + currentBookingTypeName() + "详情页超时 cost=" + (Date.now() - start) + "ms");
     return false;
 }
 
 function reenterBookingPageAfterLogin() {
-    logx("LOGIN", "登录后按固定路径重新进入预约页：首页 -> " + currentExhibitProfile().shortName + "展馆 -> 普通预约");
+    logx("LOGIN", "登录后按固定路径重新进入预约页：首页 -> " + currentExhibitProfile().shortName + "展馆 -> " + currentBookingTypeName());
     // 业务前提：授权登录完成后小程序会回到首页。
     // 因此不再用 OCR 检查是否仍在预约详情页，避免登录后首页场景被慢 OCR 拖住。
 
@@ -2002,16 +2579,16 @@ function reenterBookingPageAfterLogin() {
         return false;
     }
 
-    var p = getNormalBookingPoint();
-    pressPoint("普通预约-登录后重进", p, CONFIG.pressDuration);
+    var p = getBookingEntryPoint();
+    pressPoint(currentBookingTypeName() + "-登录后重进", p, CONFIG.pressDuration);
     sleep(1500);
     return waitForBookingPageOnly(12000);
 }
 
 function enterBookingPageForCollect() {
-    var p = getNormalBookingPoint();
-    pressPoint("普通预约", p, CONFIG.pressDuration);
-    logx("LOGIN", "点击普通预约后等待2秒，再判断本轮是否需要授权登录");
+    var p = getBookingEntryPoint();
+    pressPoint(currentBookingTypeName(), p, CONFIG.pressDuration);
+    logx("LOGIN", "点击" + currentBookingTypeName() + "后等待2秒，再判断本轮是否需要授权登录");
     sleep(2000);
 
     var loginHandled = handleLoginIfNeeded();
@@ -2024,7 +2601,7 @@ function enterBookingPageForCollect() {
         }
         return true;
     } else {
-        logx("LOGIN", "点击普通预约后未出现授权登录，本轮按无需登录处理");
+        logx("LOGIN", "点击" + currentBookingTypeName() + "后未出现授权登录，本轮按无需登录处理");
     }
 
     if (!waitForBookingPageOnly(25000)) {
@@ -2054,9 +2631,13 @@ function prepareFlow() {
     launchMiniProgram();
     handleStartupNoticeDialog();
     if (!enterHomeExhibitionPage()) fail("未能进入参观预约页，请查看截图/OCR日志");
-    if (!enterBookingPageForCollect()) fail("未能进入普通预约详情页，请查看截图/OCR日志");
+    if (!enterBookingPageForCollect()) fail("未能进入" + currentBookingTypeName() + "详情页，请查看截图/OCR日志");
     collectDatePoint();
-    collectAudienceAndPeriodPoints();
+    if (isParentBookingMode()) {
+        collectParentAudienceAndPeriodPoints();
+    } else {
+        collectAudienceAndPeriodPoints();
+    }
     saveCache();
     if (!returnToExhibitionPage()) fail("第一轮采集后未能返回参观预约页");
     logx("FLOW", "第一轮预热与采集结束");
@@ -2178,9 +2759,9 @@ function rushFlow() {
     runtime.useBufferedLog = true;
     runtime.logBuffer = [];
 
-    var normalPoint = getNormalBookingPoint();
+    var bookingEntryPoint = isParentBookingMode() ? getParentBookingPoint() : getNormalBookingPoint();
     var bookingListSentinel = collectBookingListSentinelPoint();
-    pressPoint("普通预约", normalPoint, CONFIG.fastPressDuration);
+    pressPoint(currentBookingTypeName(), bookingEntryPoint, CONFIG.fastPressDuration);
 
     // 等待"参观日期"被选中的状态背景色出现，最多2秒；未出现则说明加载异常，中断流程
     if (!waitBookingListSentinelGone(bookingListSentinel)) {
@@ -2227,14 +2808,38 @@ function rushFlow() {
     pressPoint("选择时段 " + CONFIG.period, periodPoint, CONFIG.fastPressDuration);
     sleep(120);
 
-    scrollToAudienceForRush();
-    sleep(CONFIG.afterAudienceScrollMs);
+    if (isParentBookingMode()) {
+        scrollToAdultForRush();
+        sleep(Math.max(CONFIG.afterAudienceScrollMs, CONFIG.parentAdultAfterScrollMs || 0));
 
-    var visitorPoints = getVisitorPointsForRush();
-    for (var i = 0; i < CONFIG.visitorCount; i++) {
-        var vp = visitorPoints[i];
-        pressPoint("游客 " + (i + 1), vp, CONFIG.visitorPressDuration);
-        sleep(CONFIG.visitorIntervalMs);
+        var adultPoints = getAdultPointsForRush();
+        for (var ai = 0; ai < CONFIG.visitorCount; ai++) {
+            var ap = adultPoints[ai];
+            pressPoint("成人 " + (ai + 1), ap, Math.max(CONFIG.visitorPressDuration, CONFIG.parentAdultPressDuration || 0));
+            sleep(CONFIG.visitorIntervalMs);
+        }
+
+        var minorScrollStrategy = scrollToMinorForRush();
+        if (!(minorScrollStrategy && minorScrollStrategy.duration <= 1)) {
+            sleep(Math.max(CONFIG.afterAudienceScrollMs, CONFIG.parentMinorAfterScrollMs || 0));
+        }
+
+        var minorPoints = getMinorPointsForRush();
+        for (var mi = 0; mi < CONFIG.minorVisitorCount; mi++) {
+            var mp = minorPoints[mi];
+            pressPoint("未成年人 " + (mi + 1), mp, Math.max(CONFIG.visitorPressDuration, CONFIG.parentMinorPressDuration || 0));
+            sleep(CONFIG.visitorIntervalMs);
+        }
+    } else {
+        scrollToAudienceForRush();
+        sleep(CONFIG.afterAudienceScrollMs);
+
+        var visitorPoints = getVisitorPointsForRush();
+        for (var i = 0; i < CONFIG.visitorCount; i++) {
+            var vp = visitorPoints[i];
+            pressPoint("游客 " + (i + 1), vp, CONFIG.visitorPressDuration);
+            sleep(CONFIG.visitorIntervalMs);
+        }
     }
 
     var confirm = getConfirmButtonPoint();
@@ -2259,6 +2864,7 @@ function rushFlow() {
 
 function validateConfig() {
     if (!EXHIBIT_PROFILES[CONFIG.exhibitMode]) fail("exhibitMode 只能是 nanjing 或 justice，当前：" + CONFIG.exhibitMode);
+    if (CONFIG.bookingType !== "normal" && CONFIG.bookingType !== "parent") fail("bookingType 只能是 normal 或 parent，当前：" + CONFIG.bookingType);
     if (!/^\d{4}$/.test(CONFIG.visitDate)) fail("visitDate 必须是四位 MMDD 字符串，例如 0505/0425");
     var m = parseInt(CONFIG.visitDate.substring(0, 2), 10);
     var d = parseInt(CONFIG.visitDate.substring(2, 4), 10);
@@ -2266,7 +2872,13 @@ function validateConfig() {
     var days = new Date(new Date().getFullYear(), m, 0).getDate();
     if (d < 1 || d > days) fail("visitDate 日期无效：" + CONFIG.visitDate);
     if (CONFIG.period !== "上午" && CONFIG.period !== "下午") fail("period 只能是 上午 或 下午");
-    if (CONFIG.visitorCount < 1 || CONFIG.visitorCount > 5) fail("visitorCount 必须在 1 到 5 之间");
+    if (isParentBookingMode()) {
+        if (CONFIG.visitorCount < 1 || CONFIG.visitorCount > 4) fail("亲子预约 visitorCount 表示成年人人数，必须在 1 到 4 之间");
+        if (CONFIG.minorVisitorCount < 1) fail("亲子预约 minorVisitorCount 必须至少为 1");
+        if (CONFIG.visitorCount + CONFIG.minorVisitorCount > 5) fail("亲子预约成人+未成年人总人数最多 5 人");
+    } else if (CONFIG.visitorCount < 1 || CONFIG.visitorCount > 5) {
+        fail("visitorCount 必须在 1 到 5 之间");
+    }
     parseStartTime();
     if (CONFIG.captcha && CONFIG.captcha.enabled && CONFIG.prepareOnly !== true) {
         requireCaptchaProfileForRun();
@@ -2293,6 +2905,7 @@ function initRuntime() {
     logx("INIT", "配置=" + JSON.stringify(CONFIG));
     logx("INIT", "屏幕=" + device.width + "x" + device.height);
     logx("INIT", "展馆模式 mode=" + CONFIG.exhibitMode + " name=" + currentExhibitProfile().shortName + " homeCardIndex=" + currentExhibitProfile().homeCardIndex);
+    logx("INIT", "预约类型 type=" + currentBookingCacheType() + " name=" + currentBookingTypeName() + " visitorCount=" + CONFIG.visitorCount + " minorVisitorCount=" + CONFIG.minorVisitorCount);
     logx("INIT", "缓存路径 primary=" + CONFIG.cachePath + " backup=" + CONFIG.backupCachePath);
     logx("INIT", "本次运行目录=" + runtime.runDir);
     logx("INIT", "本次日志路径=" + runtime.logPath + " latest日志路径=" + runtime.latestLogPath);

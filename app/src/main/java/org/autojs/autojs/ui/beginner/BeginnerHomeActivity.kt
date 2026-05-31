@@ -62,6 +62,8 @@ import androidx.compose.ui.window.Dialog
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import org.autojs.autojs.external.inputmethod.CaptchaInputMethodStatus
 import org.autojs.autojs.model.automation.AutomationScripts
+import org.autojs.autojs.model.automation.BOOKING_TYPE_NORMAL
+import org.autojs.autojs.model.automation.BOOKING_TYPE_PARENT
 import org.autojs.autojs.model.automation.BookingConfig
 import org.autojs.autojs.model.automation.EXHIBIT_MODE_JUSTICE
 import org.autojs.autojs.model.automation.EXHIBIT_MODE_NANJING
@@ -155,17 +157,37 @@ private fun BeginnerHomeScreen(
     }
 
     var exhibitMode by rememberSaveable { mutableStateOf(initialConfig.exhibitMode) }
+    var bookingType by rememberSaveable { mutableStateOf(initialConfig.bookingType) }
     var visitDate by rememberSaveable { mutableStateOf(initialConfig.visitDate) }
     var period by rememberSaveable { mutableStateOf(initialConfig.period) }
-    var visitorCount by rememberSaveable { mutableStateOf(initialConfig.visitorCount) }
+    var visitorCount by rememberSaveable {
+        mutableStateOf(
+            if (initialConfig.bookingType == BOOKING_TYPE_PARENT) {
+                initialConfig.visitorCount.coerceIn(1, 4)
+            } else {
+                initialConfig.visitorCount
+            }
+        )
+    }
+    var minorVisitorCount by rememberSaveable {
+        mutableStateOf(
+            if (initialConfig.bookingType == BOOKING_TYPE_PARENT) {
+                initialConfig.minorVisitorCount.coerceIn(1, 5 - visitorCount)
+            } else {
+                initialConfig.minorVisitorCount.coerceAtLeast(1)
+            }
+        )
+    }
     var startTime by rememberSaveable { mutableStateOf(initialConfig.startTime) }
     var skipFinalSubmit by rememberSaveable { mutableStateOf(initialConfig.skipFinalSubmit) }
     var autoSolveSliderCaptcha by rememberSaveable { mutableStateOf(initialConfig.autoSolveSliderCaptcha) }
     val config = BookingConfig(
         exhibitMode = exhibitMode,
+        bookingType = bookingType,
         visitDate = visitDate.trim(),
         period = period,
         visitorCount = visitorCount,
+        minorVisitorCount = minorVisitorCount,
         startTime = startTime.trim(),
         skipFinalSubmit = skipFinalSubmit,
         autoSolveSliderCaptcha = autoSolveSliderCaptcha
@@ -276,7 +298,19 @@ private fun BeginnerHomeScreen(
             )
             ConfigCard(
                 exhibitMode = exhibitMode,
-                onExhibitModeChange = { exhibitMode = it },
+                bookingType = bookingType,
+                onBookingModeChange = { newExhibitMode, newBookingType ->
+                    exhibitMode = newExhibitMode
+                    val switchedToParent = bookingType != BOOKING_TYPE_PARENT && newBookingType == BOOKING_TYPE_PARENT
+                    bookingType = newBookingType
+                    if (newBookingType == BOOKING_TYPE_PARENT) {
+                        visitorCount = visitorCount.coerceIn(1, 4)
+                        if (switchedToParent || minorVisitorCount < 1) {
+                            minorVisitorCount = 1
+                        }
+                        minorVisitorCount = minorVisitorCount.coerceIn(1, 5 - visitorCount)
+                    }
+                },
                 visitDate = visitDate,
                 onVisitDateChange = { value ->
                     if (value.length <= 4 && value.all { it.isDigit() }) {
@@ -286,7 +320,14 @@ private fun BeginnerHomeScreen(
                 period = period,
                 onPeriodChange = { period = it },
                 visitorCount = visitorCount,
-                onVisitorCountChange = { visitorCount = it },
+                onVisitorCountChange = { count ->
+                    visitorCount = count
+                    if (bookingType == BOOKING_TYPE_PARENT) {
+                        minorVisitorCount = minorVisitorCount.coerceIn(1, 5 - count)
+                    }
+                },
+                minorVisitorCount = minorVisitorCount,
+                onMinorVisitorCountChange = { minorVisitorCount = it },
                 startTime = startTime,
                 onStartTimeChange = { startTime = it },
                 skipFinalSubmit = skipFinalSubmit,
@@ -724,13 +765,16 @@ private fun SetupStatusRow(
 @Composable
 private fun ConfigCard(
     exhibitMode: String,
-    onExhibitModeChange: (String) -> Unit,
+    bookingType: String,
+    onBookingModeChange: (String, String) -> Unit,
     visitDate: String,
     onVisitDateChange: (String) -> Unit,
     period: String,
     onPeriodChange: (String) -> Unit,
     visitorCount: Int,
     onVisitorCountChange: (Int) -> Unit,
+    minorVisitorCount: Int,
+    onMinorVisitorCountChange: (Int) -> Unit,
     startTime: String,
     onStartTimeChange: (String) -> Unit,
     skipFinalSubmit: Boolean,
@@ -766,23 +810,42 @@ private fun ConfigCard(
                 style = MaterialTheme.typography.bodySmall
             )
 
-            Text(text = "展馆", style = MaterialTheme.typography.titleSmall)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                SelectableButton(
-                    modifier = Modifier.weight(1f),
-                    text = "南京",
-                    selected = exhibitMode == EXHIBIT_MODE_NANJING,
-                    onClick = { onExhibitModeChange(EXHIBIT_MODE_NANJING) }
-                )
-                SelectableButton(
-                    modifier = Modifier.weight(1f),
-                    text = "正义必胜",
-                    selected = exhibitMode == EXHIBIT_MODE_JUSTICE,
-                    onClick = { onExhibitModeChange(EXHIBIT_MODE_JUSTICE) }
-                )
+            Text(text = "预约模式", style = MaterialTheme.typography.titleSmall)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    SelectableButton(
+                        modifier = Modifier.weight(1f),
+                        text = "南京普通",
+                        selected = exhibitMode == EXHIBIT_MODE_NANJING && bookingType == BOOKING_TYPE_NORMAL,
+                        onClick = { onBookingModeChange(EXHIBIT_MODE_NANJING, BOOKING_TYPE_NORMAL) }
+                    )
+                    SelectableButton(
+                        modifier = Modifier.weight(1f),
+                        text = "南京亲子",
+                        selected = exhibitMode == EXHIBIT_MODE_NANJING && bookingType == BOOKING_TYPE_PARENT,
+                        onClick = { onBookingModeChange(EXHIBIT_MODE_NANJING, BOOKING_TYPE_PARENT) }
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    SelectableButton(
+                        modifier = Modifier.weight(1f),
+                        text = "正义普通",
+                        selected = exhibitMode == EXHIBIT_MODE_JUSTICE && bookingType == BOOKING_TYPE_NORMAL,
+                        onClick = { onBookingModeChange(EXHIBIT_MODE_JUSTICE, BOOKING_TYPE_NORMAL) }
+                    )
+                    SelectableButton(
+                        modifier = Modifier.weight(1f),
+                        text = "正义亲子",
+                        selected = exhibitMode == EXHIBIT_MODE_JUSTICE && bookingType == BOOKING_TYPE_PARENT,
+                        onClick = { onBookingModeChange(EXHIBIT_MODE_JUSTICE, BOOKING_TYPE_PARENT) }
+                    )
+                }
             }
 
             Text(text = "参观时段", style = MaterialTheme.typography.titleSmall)
@@ -804,18 +867,43 @@ private fun ConfigCard(
                 )
             }
 
-            Text(text = "参观人数", style = MaterialTheme.typography.titleSmall)
+            Text(
+                text = if (bookingType == BOOKING_TYPE_PARENT) "成年人人数" else "参观人数",
+                style = MaterialTheme.typography.titleSmall
+            )
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                (1..5).forEach { count ->
+                val adultCountRange = if (bookingType == BOOKING_TYPE_PARENT) 1..4 else 1..5
+                adultCountRange.forEach { count ->
                     SelectableButton(
                         modifier = Modifier.weight(1f),
                         text = count.toString(),
                         selected = visitorCount == count,
                         onClick = { onVisitorCountChange(count) }
                     )
+                }
+            }
+            if (bookingType == BOOKING_TYPE_PARENT) {
+                Text(
+                    text = "亲子预约中，成年人人数加未成年人个数最多 5 人。",
+                    color = AppTextSecondary,
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Text(text = "未成年人个数", style = MaterialTheme.typography.titleSmall)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    (1..(5 - visitorCount)).forEach { count ->
+                        SelectableButton(
+                            modifier = Modifier.weight(1f),
+                            text = count.toString(),
+                            selected = minorVisitorCount == count,
+                            onClick = { onMinorVisitorCountChange(count) }
+                        )
+                    }
                 }
             }
 
