@@ -884,7 +884,8 @@ function shouldSkipCacheInPrepare(key) {
         periodTitle: true,
         periodMorning: true,
         periodAfternoon: true,
-        confirmBooking: true
+        confirmBooking: true,
+        bookingListSentinel: true
     };
     if (keys[key]) {
         logx("CACHE", key + " 第一轮优先实时采集，跳过旧缓存");
@@ -1174,6 +1175,127 @@ function detectColorBlockInRegion(region, colorStr, threshold) {
 }
 runtime.detectColorBlockInRegion = detectColorBlockInRegion;
 
+function imagePixelAt(img, x, y) {
+    if (img && typeof img.pixel === "function") {
+        return img.pixel(Math.round(x), Math.round(y));
+    }
+    return images.pixel(img, Math.round(x), Math.round(y));
+}
+
+function isNearColor(color, r, g, b, threshold) {
+    return Math.abs(colors.red(color) - r) <= threshold &&
+        Math.abs(colors.green(color) - g) <= threshold &&
+        Math.abs(colors.blue(color) - b) <= threshold;
+}
+
+function probeBookingListSentinel(point) {
+    var img = null;
+    try {
+        img = captureScreen();
+        var halfW = Math.max(24, Math.round(scaleX(48)));
+        var halfH = Math.max(18, Math.round(scaleY(32)));
+        var step = Math.max(5, Math.round(Math.min(scaleX(8), scaleY(8))));
+        var left = Math.round(clamp(point.x - halfW, 0, device.width - 1));
+        var top = Math.round(clamp(point.y - halfH, 0, device.height - 1));
+        var right = Math.round(clamp(point.x + halfW, left + 1, device.width));
+        var bottom = Math.round(clamp(point.y + halfH, top + 1, device.height));
+        var hits = 0;
+        var total = 0;
+        for (var y = top; y < bottom; y += step) {
+            for (var x = left; x < right; x += step) {
+                total++;
+                if (isNearColor(imagePixelAt(img, x, y), 168, 125, 108, 22)) {
+                    hits++;
+                }
+            }
+        }
+        var density = total > 0 ? hits / total : 0;
+        return {
+            visible: density >= 0.55,
+            density: Math.round(density * 1000) / 1000,
+            hits: hits,
+            total: total,
+            x: left,
+            y: top,
+            w: right - left,
+            h: bottom - top
+        };
+    } catch (e) {
+        logx("COLOR", "预约列表哨兵检测异常 err=" + e);
+        return { visible: true, density: 1, error: String(e) };
+    } finally {
+        if (img) { try { img.recycle(); } catch (e) {} }
+    }
+}
+
+function inferBookingListSentinelPoint() {
+    var normal = runtime.cache.points && runtime.cache.points.normalBooking;
+    if (normal && typeof normal.y === "number") {
+        return makePoint(scaleX(180), normal.y + scaleY(900), "infer:bookingListSentinelFromNormal");
+    }
+    return scaledPoint("bookingListSentinelFallback", 180, 2060);
+}
+
+function collectBookingListSentinelPoint(region) {
+    var cached = getCachedPoint("bookingListSentinel");
+    if (cached) return cached;
+
+    if (STAGE === "RUSH") {
+        return inferBookingListSentinelPoint();
+    }
+
+    var items = ocrRegion(STAGE, "查找 优待预约哨兵", region || [0, scaleY(700), device.width, scaleY(1700)]);
+    var item = findTextItem(items, "优待预约", "bottom");
+    if (item) {
+        var r = itemRect(item);
+        var p = makePoint(scaleX(180), r.cy, "ocr:bookingListSentinelPreferential");
+        logx("COORD", "优待预约哨兵定位 text=" + item.text + " " + pointText(p) + " rect=" + JSON.stringify(r));
+        setCachedPoint("bookingListSentinel", p);
+        return p;
+    }
+
+    var fallback = inferBookingListSentinelPoint();
+    logx("COORD", "优待预约哨兵未识别，使用推算点 " + pointText(fallback));
+    setCachedPoint("bookingListSentinel", fallback);
+    return fallback;
+}
+
+function waitBookingListSentinelGone(point) {
+    var firstDelayMs = 50;
+    var afterGoneWaitMs = 100;
+    var timeoutMs = 1600;
+    var intervalMs = 25;
+    if (!point) {
+        point = inferBookingListSentinelPoint();
+    }
+    sleep(firstDelayMs);
+    var start = Date.now();
+    var probes = 0;
+    var last = null;
+    var details = [];
+    while (Date.now() - start < timeoutMs) {
+        probes++;
+        var probeStart = Date.now();
+        last = probeBookingListSentinel(point);
+        details.push({
+            i: probes,
+            cost: Date.now() - probeStart,
+            visible: last.visible,
+            density: last.density,
+            hits: last.hits,
+            total: last.total
+        });
+        if (!last.visible) {
+            logx("RUSH", "参观预约列表哨兵已消失 elapsed=" + (Date.now() - start) + "ms probes=" + probes + " probe=" + JSON.stringify(last) + " details=" + JSON.stringify(details));
+            sleep(afterGoneWaitMs);
+            return true;
+        }
+        sleep(intervalMs);
+    }
+    logx("RUSH", "参观预约列表哨兵仍存在，疑似未离开上一页 elapsed=" + (Date.now() - start) + "ms probes=" + probes + " probe=" + JSON.stringify(last) + " details=" + JSON.stringify(details));
+    return false;
+}
+
 // ==================== 页面坐标采集与推算 ====================
 function getHomeExhibitPoint() {
     var cached = getCachedPoint("homeExhibit");
@@ -1250,11 +1372,13 @@ function getNormalBookingPoint() {
     var p = findPointByText("普通预约", "普通预约", region, "top");
     if (p) {
         setCachedPoint("normalBooking", p);
+        collectBookingListSentinelPoint(region);
         return p;
     }
 
     var fallback = scaledPoint("normalBookingCard", 720, 1180);
     setCachedPoint("normalBooking", fallback);
+    collectBookingListSentinelPoint(region);
     return fallback;
 }
 
@@ -1857,7 +1981,7 @@ function handleLoginIfNeeded() {
 function waitForBookingPageOnly(timeoutMs) {
     var start = Date.now();
     while (Date.now() - start < timeoutMs) {
-        var datePoint = findPointByText("预约页-参观日期", "参观日期", [0, scaleY(500), device.width, scaleY(900)], "top");
+        var datePoint = findPointByText("预约页-参观日期", ["参观日期", "叁观日期", "弎观日期", "觀日期", "观日期"], [0, scaleY(500), device.width, scaleY(900)], "top");
         if (datePoint) {
             logx("PAGE", "已确认进入预约页 cost=" + (Date.now() - start) + "ms");
             return true;
@@ -2054,9 +2178,16 @@ function rushFlow() {
     runtime.useBufferedLog = true;
     runtime.logBuffer = [];
 
-    pressPoint("普通预约", getNormalBookingPoint(), CONFIG.fastPressDuration);
+    var normalPoint = getNormalBookingPoint();
+    var bookingListSentinel = collectBookingListSentinelPoint();
+    pressPoint("普通预约", normalPoint, CONFIG.fastPressDuration);
 
     // 等待"参观日期"被选中的状态背景色出现，最多2秒；未出现则说明加载异常，中断流程
+    if (!waitBookingListSentinelGone(bookingListSentinel)) {
+        flushLogBuffer();
+        return { ok: false, pageLoadTimeout: true, reason: "参观预约列表未离开" };
+    }
+
     var pageLoadDetectStart = Date.now();
     // 检测区域覆盖"参观日期"网格，包含 南京 和 正义必胜 的高度范围
     var dateDetectRegion = [0, scaleY(800), device.width, scaleY(600)];
@@ -2064,7 +2195,6 @@ function rushFlow() {
     
     // 新增：内存循环计数器，完全不消耗性能
     var loopCount = 0; 
-    sleep(350); 
     while (Date.now() - pageLoadDetectStart < 2000) {
         loopCount++; // 每次循环计数 +1
         if (detectColorBlockInRegion(dateDetectRegion, "#A87D6C", 15)) { // 容差设为15，更严谨
@@ -2083,7 +2213,7 @@ function rushFlow() {
     }
     
     // 新增：计算单次循环的平均耗时（刨除最初始的 150ms 纯等待）
-    var avgLoopTime = loopCount > 0 ? Math.round((elapsed - 150) / loopCount) : 0;
+    var avgLoopTime = loopCount > 0 ? Math.round(elapsed / loopCount) : 0;
     
     // 升级日志：输出 总耗时、总循环次数、单次循环平均耗时
     logx("RUSH", "日期选中色块已出现 elapsed=" + elapsed + "ms 探测次数=" + loopCount + "次 单次探测平均耗时=" + avgLoopTime + "ms");
