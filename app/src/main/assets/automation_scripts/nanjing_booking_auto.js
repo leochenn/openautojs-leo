@@ -1219,42 +1219,6 @@ function detectTextInRegion(region, keyword) {
     }
 }
 
-// === 新增：严格的实心色块检测 ===
-function detectColorBlockInRegion(region, colorStr, threshold) {
-    var img = null;
-    try {
-        img = captureScreen();
-        var offsetX = Math.round(clamp(region[0], 0, device.width - 1));
-        var offsetY = Math.round(clamp(region[1], 0, device.height - 1));
-        var w = Math.round(clamp(region[2], 1, device.width - offsetX));
-        var h = Math.round(clamp(region[3], 1, device.height - offsetY));
-        
-        // 【核心防御】：定义色块的形状特征 (相对第一个找到的点的偏移量)
-        // 只有当起始点，以及它右侧、下方、右下方 15~25 像素全都是相同颜色时，才判定为“方框”。
-        // 文字的笔画很细，一旦向右或向下偏移 15 个像素，一定会戳到白色背景上，从而被完美过滤。
-        var shapeOffsets = [
-            [15, 0, colorStr],   // 向右 15 像素也是棕色
-            [0, 15, colorStr],   // 向下 15 像素也是棕色
-            [15, 15, colorStr],  // 右下 15 像素也是棕色
-            [25, 25, colorStr]   // 右下 25 像素也是棕色
-        ];
-
-        // 使用 findMultiColors (多点找色) 代替 findColor (单点找色)
-        var p = images.findMultiColors(img, colorStr, shapeOffsets, {
-            region: [offsetX, offsetY, w, h],
-            threshold: threshold || 20
-        });
-        
-        return !!p; // 如果找到了符合上述所有特征的像素群，才返回 true
-    } catch (e) {
-        logx("COLOR", "色块检测异常 err=" + e);
-        return false;
-    } finally {
-        if (img) { try { img.recycle(); } catch (e) {} }
-    }
-}
-runtime.detectColorBlockInRegion = detectColorBlockInRegion;
-
 function imagePixelAt(img, x, y) {
     if (img && typeof img.pixel === "function") {
         return img.pixel(Math.round(x), Math.round(y));
@@ -1266,6 +1230,140 @@ function isNearColor(color, r, g, b, threshold) {
     return Math.abs(colors.red(color) - r) <= threshold &&
         Math.abs(colors.green(color) - g) <= threshold &&
         Math.abs(colors.blue(color) - b) <= threshold;
+}
+
+function isNearWhite(color, threshold) {
+    threshold = threshold || 50;
+    return colors.red(color) >= 255 - threshold &&
+        colors.green(color) >= 255 - threshold &&
+        colors.blue(color) >= 255 - threshold;
+}
+
+function countWhiteTextInSelectedDateCell(img, cx, cy) {
+    var bands = [
+        { name: "dateNumber", x1: -45, x2: 45, y1: -25, y2: 25 },
+        { name: "statusText", x1: -62, x2: 62, y1: 35, y2: 82 }
+    ];
+    var stepX = Math.max(3, Math.round(scaleX(5)));
+    var stepY = Math.max(3, Math.round(scaleY(5)));
+    var hits = 0;
+    var samples = 0;
+    var summaries = [];
+
+    for (var i = 0; i < bands.length; i++) {
+        var band = bands[i];
+        var bandHits = 0;
+        var bandSamples = 0;
+        var left = Math.round(clamp(cx + scaleX(band.x1), 0, device.width - 1));
+        var right = Math.round(clamp(cx + scaleX(band.x2), left + 1, device.width));
+        var top = Math.round(clamp(cy + scaleY(band.y1), 0, device.height - 1));
+        var bottom = Math.round(clamp(cy + scaleY(band.y2), top + 1, device.height));
+
+        for (var y = top; y <= bottom; y += stepY) {
+            for (var x = left; x <= right; x += stepX) {
+                samples++;
+                bandSamples++;
+                if (isNearWhite(imagePixelAt(img, x, y), 75)) {
+                    hits++;
+                    bandHits++;
+                }
+            }
+        }
+        summaries.push({
+            name: band.name,
+            hits: bandHits,
+            samples: bandSamples,
+            x: left,
+            y: top,
+            w: right - left,
+            h: bottom - top
+        });
+    }
+
+    return {
+        hits: hits,
+        samples: samples,
+        bands: summaries
+    };
+}
+
+function probeSelectedDateCellAt(img, cx, cy, threshold) {
+    var hits = 0;
+    var samples = 0;
+    var anchors = [
+        [-58, 20],
+        [58, 20],
+        [-58, 70],
+        [58, 70],
+        [-58, 120],
+        [58, 120],
+        [0, 135]
+    ];
+
+    for (var i = 0; i < anchors.length; i++) {
+        var x = Math.round(clamp(cx + scaleX(anchors[i][0]), 0, device.width - 1));
+        var y = Math.round(clamp(cy + scaleY(anchors[i][1]), 0, device.height - 1));
+        var hit = isNearColor(imagePixelAt(img, x, y), 168, 125, 108, threshold || 18);
+        samples++;
+        if (hit) hits++;
+    }
+
+    // 选中日期是一个大面积实心矩形；说明文案/圆形图标不会同时覆盖这些分散背景锚点。
+    if (hits < 5) {
+        return {
+            visible: false,
+            hits: hits,
+            whiteHits: 0,
+            backgroundSamples: samples,
+            samples: samples
+        };
+    }
+
+    var whiteProbe = countWhiteTextInSelectedDateCell(img, cx, cy);
+    samples += whiteProbe.samples;
+
+    return {
+        visible: hits >= 5 && whiteProbe.hits >= 4,
+        hits: hits,
+        whiteHits: whiteProbe.hits,
+        whiteSamples: whiteProbe.samples,
+        whiteProbe: whiteProbe,
+        backgroundSamples: anchors.length,
+        samples: samples
+    };
+}
+
+function detectSelectedDateCellInGrid(threshold) {
+    var start = Date.now();
+    var img = null;
+    var captureCost = 0;
+    try {
+        var captureStart = Date.now();
+        img = captureScreen();
+        captureCost = Date.now() - captureStart;
+        var profile = currentExhibitProfile();
+        var xs = [scaleX(190), scaleX(365), scaleX(545), scaleX(720), scaleX(900), scaleX(1080), scaleX(1255)];
+        var ys = [scaleY(profile.dateGridYs[0]), scaleY(profile.dateGridYs[1])];
+        var best = null;
+
+        for (var row = 0; row < ys.length; row++) {
+            for (var col = 0; col < xs.length; col++) {
+                var probe = probeSelectedDateCellAt(img, xs[col], ys[row], threshold);
+                probe.row = row;
+                probe.col = col;
+                if (!best || probe.hits + (probe.whiteHits || 0) > best.hits + (best.whiteHits || 0)) best = probe;
+                if (probe.visible) {
+                    return { found: true, row: row, col: col, costMs: Date.now() - start, captureCostMs: captureCost, probe: probe };
+                }
+            }
+        }
+        return { found: false, costMs: Date.now() - start, captureCostMs: captureCost, best: best };
+    } catch (e) {
+        logx("COLOR", "日期网格选中色块检测异常 err=" + e);
+        return { found: false, costMs: Date.now() - start, captureCostMs: captureCost, error: String(e) };
+    } finally {
+        if (img) { try { img.recycle(); } catch (e) {} }
+    }
 }
 
 function probeBookingListSentinel(point) {
@@ -2770,15 +2868,25 @@ function rushFlow() {
     }
 
     var pageLoadDetectStart = Date.now();
-    // 检测区域覆盖"参观日期"网格，包含 南京 和 正义必胜 的高度范围
-    var dateDetectRegion = [0, scaleY(800), device.width, scaleY(600)];
     var pageLoadDetected = false;
+    var lastDateGridProbe = null;
+    var dateGridDetectTotalCost = 0;
+    var dateGridDetectMaxCost = 0;
+    var dateGridCaptureTotalCost = 0;
+    var dateGridCaptureMaxCost = 0;
     
     // 新增：内存循环计数器，完全不消耗性能
     var loopCount = 0; 
     while (Date.now() - pageLoadDetectStart < 2000) {
         loopCount++; // 每次循环计数 +1
-        if (detectColorBlockInRegion(dateDetectRegion, "#A87D6C", 15)) { // 容差设为15，更严谨
+        lastDateGridProbe = detectSelectedDateCellInGrid(15);
+        var detectCost = lastDateGridProbe && typeof lastDateGridProbe.costMs === "number" ? lastDateGridProbe.costMs : 0;
+        var captureCost = lastDateGridProbe && typeof lastDateGridProbe.captureCostMs === "number" ? lastDateGridProbe.captureCostMs : 0;
+        dateGridDetectTotalCost += detectCost;
+        if (detectCost > dateGridDetectMaxCost) dateGridDetectMaxCost = detectCost;
+        dateGridCaptureTotalCost += captureCost;
+        if (captureCost > dateGridCaptureMaxCost) dateGridCaptureMaxCost = captureCost;
+        if (lastDateGridProbe && lastDateGridProbe.found) {
             pageLoadDetected = true;
             break;
         }
@@ -2789,15 +2897,19 @@ function rushFlow() {
     
     if (!pageLoadDetected) {
         flushLogBuffer();
-        logx("RUSH", "日期选中色块未在1.5秒内出现，中断流程 elapsed=" + elapsed + "ms loopCount=" + loopCount);
-        return { ok: false, pageLoadTimeout: true, reason: "日期选中色块未出现 elapsed=" + elapsed + "ms" };
+        var timeoutAvgCost = loopCount > 0 ? Math.round(dateGridDetectTotalCost / loopCount) : 0;
+        var timeoutAvgCaptureCost = loopCount > 0 ? Math.round(dateGridCaptureTotalCost / loopCount) : 0;
+        logx("RUSH", "日期网格选中色块未在2秒内出现，中断流程 elapsed=" + elapsed + "ms loopCount=" + loopCount + " algoTotalCost=" + dateGridDetectTotalCost + "ms algoAvgCost=" + timeoutAvgCost + "ms algoMaxCost=" + dateGridDetectMaxCost + "ms captureTotalCost=" + dateGridCaptureTotalCost + "ms captureAvgCost=" + timeoutAvgCaptureCost + "ms captureMaxCost=" + dateGridCaptureMaxCost + "ms lastProbe=" + JSON.stringify(lastDateGridProbe));
+        return { ok: false, pageLoadTimeout: true, reason: "日期网格选中色块未出现 elapsed=" + elapsed + "ms" };
     }
     
     // 新增：计算单次循环的平均耗时（刨除最初始的 150ms 纯等待）
     var avgLoopTime = loopCount > 0 ? Math.round(elapsed / loopCount) : 0;
+    var avgDetectCost = loopCount > 0 ? Math.round(dateGridDetectTotalCost / loopCount) : 0;
+    var avgCaptureCost = loopCount > 0 ? Math.round(dateGridCaptureTotalCost / loopCount) : 0;
     
     // 升级日志：输出 总耗时、总循环次数、单次循环平均耗时
-    logx("RUSH", "日期选中色块已出现 elapsed=" + elapsed + "ms 探测次数=" + loopCount + "次 单次探测平均耗时=" + avgLoopTime + "ms");
+    logx("RUSH", "日期网格选中色块已出现 elapsed=" + elapsed + "ms 探测次数=" + loopCount + "次 单次循环平均耗时=" + avgLoopTime + "ms algoTotalCost=" + dateGridDetectTotalCost + "ms algoAvgCost=" + avgDetectCost + "ms algoMaxCost=" + dateGridDetectMaxCost + "ms captureTotalCost=" + dateGridCaptureTotalCost + "ms captureAvgCost=" + avgCaptureCost + "ms captureMaxCost=" + dateGridCaptureMaxCost + "ms probe=" + JSON.stringify(lastDateGridProbe));
 
     var datePoint = getCachedPoint("targetDate");
     if (!datePoint) datePoint = collectDatePoint();
