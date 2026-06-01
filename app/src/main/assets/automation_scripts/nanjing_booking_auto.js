@@ -2058,6 +2058,27 @@ function collectVisibleCredentialRowPoints(sectionName) {
     return points;
 }
 
+function collectMinorPointsVisibleAfterAdultTop(visiblePoints) {
+    var minorTitle = findMinorTitleOnCurrentPage("minor title boundary after adult top");
+    if (!minorTitle) {
+        logx("CACHE", "minor title is not visible after adult top; keep minor section scroll");
+        return null;
+    }
+    var minTitleGap = scaleY(45);
+    var points = [];
+    for (var i = 0; i < visiblePoints.length; i++) {
+        if (visiblePoints[i].y > minorTitle.y + minTitleGap) {
+            points.push(visiblePoints[i]);
+        }
+    }
+    if (points.length < CONFIG.minorVisitorCount) {
+        logx("CACHE", "minor rows below title not enough after adult top required=" + CONFIG.minorVisitorCount + " actual=" + points.length + " minorTitleY=" + minorTitle.y);
+        return null;
+    }
+    logx("CACHE", "minor rows collected below visible minor title count=" + points.length + " minorTitleY=" + minorTitle.y);
+    return points.slice(0, CONFIG.minorVisitorCount);
+}
+
 function assertCurrentParentSection(sectionName) {
     var items = ocrRegion(STAGE, "确认当前亲子人员区-" + sectionName, [0, scaleY(250), device.width, Math.floor(device.height * 0.48)]);
     var adult = findTextItem(items, "成人信息", "top");
@@ -2162,8 +2183,8 @@ function collectAdultSectionPointsForPrepare(adultTitle) {
     logx("CACHE", "adultRushPoints 写入 " + JSON.stringify(adultPoints));
 
     var totalNeeded = CONFIG.visitorCount + CONFIG.minorVisitorCount;
-    if (visiblePoints.length >= totalNeeded) {
-        var minorPoints = visiblePoints.slice(CONFIG.visitorCount, totalNeeded);
+    var minorPoints = collectMinorPointsVisibleAfterAdultTop(visiblePoints);
+    if (minorPoints && minorPoints.length >= CONFIG.minorVisitorCount) {
         runtime.cache.minorPrepPoints = minorPoints;
         runtime.cache.minorRushPoints = minorPoints;
         setCacheValue("minorScrollStrategy", {
