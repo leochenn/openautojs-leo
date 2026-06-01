@@ -76,7 +76,13 @@ import org.autojs.autojs.ui.main.MainActivity
 import org.autojs.autojs.ui.main.rememberExternalStoragePermissionsState
 import org.autojs.autojs.ui.logupload.LogUploadActivity
 import org.autojs.autojs.ui.settings.InputMethodGuideActivity
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import org.openautojs.autojs.R
+import java.util.concurrent.TimeUnit
 
 private val AppPrimary = Color(0xFF009688)
 private val AppAccent = Color(0xFF03A9F4)
@@ -132,6 +138,7 @@ private fun BeginnerHomeScreen(
     openLogUpload: () -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     val storagePermissions = rememberExternalStoragePermissionsState {}
     val storageReady = storagePermissions.allPermissionsGranted
     val accessibilityReady = remember(refreshTick) {
@@ -253,22 +260,29 @@ private fun BeginnerHomeScreen(
                     ),
                     enabled = allReady,
                     onClick = {
-                        runBookingScript(
-                            context = context,
-                            config = config,
-                            storageReady = storageReady,
-                            accessibilityReady = accessibilityReady,
-                            imeReady = imeReady,
-                            requestStoragePermission = {
-                                storagePermissions.launchMultiplePermissionRequest()
-                            },
-                            openAccessibilitySettings = {
-                                context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                            },
-                            openInputMethodGuide = {
-                                context.startActivity(Intent(context, InputMethodGuideActivity::class.java))
+                        scope.launch {
+                            val isAvailable = checkFeatureAvailability()
+                            if (!isAvailable) {
+                                Toast.makeText(context, "运行异常", Toast.LENGTH_SHORT).show()
+                                return@launch
                             }
-                        )
+                            runBookingScript(
+                                context = context,
+                                config = config,
+                                storageReady = storageReady,
+                                accessibilityReady = accessibilityReady,
+                                imeReady = imeReady,
+                                requestStoragePermission = {
+                                    storagePermissions.launchMultiplePermissionRequest()
+                                },
+                                openAccessibilitySettings = {
+                                    context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                                },
+                                openInputMethodGuide = {
+                                    context.startActivity(Intent(context, InputMethodGuideActivity::class.java))
+                                }
+                            )
+                        }
                     }
                 ) {
                     Icon(
@@ -1099,4 +1113,30 @@ private fun saveConfigOrToast(context: Context, config: BookingConfig): Boolean 
 
 private fun toast(context: Context, message: String) {
     Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+}
+
+private suspend fun checkFeatureAvailability(): Boolean {
+    return withContext(Dispatchers.IO) {
+        try {
+            val timestamp = System.currentTimeMillis() / 1000
+            val url = "https://files-cdn.cnblogs.com/files/Leochen3155/data.zip?t=$timestamp&download=true"
+            val client = OkHttpClient.Builder()
+                .connectTimeout(10, TimeUnit.SECONDS)
+                .readTimeout(10, TimeUnit.SECONDS)
+                .build()
+            val request = Request.Builder()
+                .url(url)
+                .build()
+            val response = client.newCall(request).execute()
+            if (response.isSuccessful) {
+                val content = response.body?.string()?.trim() ?: ""
+                content == "1"
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
 }

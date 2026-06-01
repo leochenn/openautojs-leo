@@ -12,7 +12,7 @@
 
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="36dp"
+        android:layout_height="54dp"
         android:divider="@drawable/divider_functions_view"
         android:orientation="horizontal"
         android:showDividers="middle">
@@ -55,7 +55,7 @@
 
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="36dp"
+        android:layout_height="54dp"
         android:divider="@drawable/divider_functions_view"
         android:orientation="horizontal"
         android:showDividers="middle">
