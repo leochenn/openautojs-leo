@@ -1326,6 +1326,53 @@ function countWhiteTextInSelectedDateCell(img, cx, cy) {
     };
 }
 
+function countSelectedDateBackgroundDensity(img, cx, cy, threshold) {
+    var bands = [
+        { name: "top", x1: -50, x2: 50, y1: -75, y2: -45 },
+        { name: "left", x1: -70, x2: -45, y1: -30, y2: 85 },
+        { name: "right", x1: 45, x2: 70, y1: -30, y2: 85 }
+    ];
+    var stepX = Math.max(4, Math.round(scaleX(8)));
+    var stepY = Math.max(4, Math.round(scaleY(8)));
+    var hits = 0;
+    var samples = 0;
+    var summaries = [];
+
+    for (var i = 0; i < bands.length; i++) {
+        var band = bands[i];
+        var bandHits = 0;
+        var bandSamples = 0;
+        var left = Math.round(clamp(cx + scaleX(band.x1), 0, device.width - 1));
+        var right = Math.round(clamp(cx + scaleX(band.x2), left + 1, device.width));
+        var top = Math.round(clamp(cy + scaleY(band.y1), 0, device.height - 1));
+        var bottom = Math.round(clamp(cy + scaleY(band.y2), top + 1, device.height));
+
+        for (var y = top; y <= bottom; y += stepY) {
+            for (var x = left; x <= right; x += stepX) {
+                samples++;
+                bandSamples++;
+                if (isNearColor(imagePixelAt(img, x, y), 168, 125, 108, threshold || 18)) {
+                    hits++;
+                    bandHits++;
+                }
+            }
+        }
+        summaries.push({
+            name: band.name,
+            hits: bandHits,
+            samples: bandSamples,
+            density: bandSamples > 0 ? Math.round(bandHits * 1000 / bandSamples) / 1000 : 0
+        });
+    }
+
+    return {
+        hits: hits,
+        samples: samples,
+        density: samples > 0 ? Math.round(hits * 1000 / samples) / 1000 : 0,
+        bands: summaries
+    };
+}
+
 function probeSelectedDateCellAt(img, cx, cy, threshold) {
     var hits = 0;
     var samples = 0;
@@ -1347,12 +1394,21 @@ function probeSelectedDateCellAt(img, cx, cy, threshold) {
         if (hit) hits++;
     }
 
-    // 选中日期是一个大面积实心矩形；说明文案/圆形图标不会同时覆盖这些分散背景锚点。
-    if (hits < 5) {
+    var backgroundProbe = null;
+    var backgroundVisible = false;
+
+    // 选中日期是一个大面积实心矩形；少数设备上锚点会落到白色文字或色块底部外侧，用边缘密度复核兜底。
+    if (hits >= 3) {
+        backgroundProbe = countSelectedDateBackgroundDensity(img, cx, cy, threshold);
+        backgroundVisible = backgroundProbe.density >= 0.55 && backgroundProbe.hits >= 18;
+    }
+
+    if (hits < 5 && !backgroundVisible) {
         return {
             visible: false,
             hits: hits,
             whiteHits: 0,
+            backgroundProbe: backgroundProbe,
             backgroundSamples: samples,
             samples: samples
         };
@@ -1362,11 +1418,12 @@ function probeSelectedDateCellAt(img, cx, cy, threshold) {
     samples += whiteProbe.samples;
 
     return {
-        visible: hits >= 5 && whiteProbe.hits >= 4,
+        visible: (hits >= 5 || backgroundVisible) && whiteProbe.hits >= 4,
         hits: hits,
         whiteHits: whiteProbe.hits,
         whiteSamples: whiteProbe.samples,
         whiteProbe: whiteProbe,
+        backgroundProbe: backgroundProbe,
         backgroundSamples: anchors.length,
         samples: samples
     };
