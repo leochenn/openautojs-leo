@@ -28,10 +28,27 @@ var CONFIG = {
     pressDuration: 20, // 常规点击按压时长；用于第一轮采集、登录、弹窗等非极速链路
     fastPressDuration: 10, // 第二轮普通预约、日期、时段、确认按钮的快速点击按压时长；越小越快但过低可能丢点击
     visitorPressDuration: 50, // 第二轮勾选游客的专用按压时长；游客列表在滚动容器内，单独加长以提高点击生效率
-    parentAdultPressDuration: 120, // 亲子成年人区独立按压时长，不影响普通预约
-    parentAdultAfterScrollMs: 1000, // 亲子成年人区拖顶后的稳定等待，不影响普通预约
-    parentMinorPressDuration: 120, // 亲子未成年人区在第二次大幅滚动后更容易吞短点击，单独加长按压时长
-    parentMinorAfterScrollMs: 1000, // 亲子未成年人区滚动后的稳定等待；只影响需要第二次拖动的场景
+    parentAdultPressDuration: 80, // 亲子成年人区独立按压时长，不影响普通预约
+    parentAdultAfterScrollMs: 1000, // 亲子成年人区固定等待；预热阶段不再探索滑动最短稳定时间
+    parentMinorPressDuration: 80, // 亲子未成年人区在第二次大幅滚动后更容易吞短点击，单独加长按压时长
+    parentMinorAfterScrollMs: 1000, // 亲子未成年人区固定等待；预热阶段不再探索滑动最短稳定时间
+    parentAfterAdultClicksMs: 100, // 亲子模式：成年人最后一次点击后，进入未成年人区前的固定等待
+    parentAfterMinorClicksMs: 100, // 亲子模式：未成年人最后一次点击后，点击确认预约前的固定等待
+    parentRushScrollCalibrationEnabled: true, // 亲子第二轮专用：第一轮预热中自测滑动后最短稳定等待
+    parentRushScrollWaitCandidates: [500, 300, 200],
+    parentRushScrollResetWaitMs: 450,
+    parentRushScrollMaxTestCandidates: 5,
+    parentRushMinorFullScrollCalibrationEnabled: false, // 未成年人区滑动已由成年人阶段标题定位确定，默认只做一次稳定验证
+    parentRushClickCalibrationEnabled: true,
+    parentRushClickVerifyWaitMs: 160,
+    parentRushClickVerifyRetries: 2,
+    parentRushClickReadyExtraMs: 740, // 亲子第二轮：滑动 OCR 可见后到可稳定点击仍需额外等 WebView 停稳，按预热验证链路保守补偿
+    parentRushActionWaitCandidates: [260, 360, 500, 700, 1000],
+    parentRushActionPressCandidates: [60, 80, 120],
+    parentRushActionIntervalCandidates: [20, 40, 80],
+    parentRushActionConfirmRuns: 1,
+    parentRushCalibrationReuseEnabled: true,
+    parentRushCalibrationReuseClickVerify: true,
     afterAudienceScrollMs: 700, // 第二轮滑动到观众信息后的等待时间；等 WebView/小程序滚动停稳后再点游客，这个值会影响滑动后的点击
     visitorIntervalMs: 80, // 第二轮连续勾选多个游客之间的间隔；避免游客卡片状态更新时吞掉后续点击
     afterConfirmCaptchaWaitMs: 800, // 第二轮点击确认预约后等待验证码弹窗渲染的时间；与 Mock 测试脚本保持一致
@@ -244,6 +261,23 @@ function parseExternalBoolean(value, fallback) {
     return fallback;
 }
 
+function parseExternalNumber(value, fallback) {
+    var n = parseInt(value, 10);
+    return isNaN(n) ? fallback : n;
+}
+
+function parseExternalNumberArray(value, fallback) {
+    var source = value;
+    if (typeof value === "string") source = value.split(",");
+    if (!source || !source.length) return fallback;
+    var arr = [];
+    for (var i = 0; i < source.length; i++) {
+        var n = parseInt(source[i], 10);
+        if (!isNaN(n) && n >= 0) arr.push(n);
+    }
+    return arr.length > 0 ? arr : fallback;
+}
+
 function applyExternalBookingConfig() {
     try {
         var path = bookingConfigPath();
@@ -263,6 +297,71 @@ function applyExternalBookingConfig() {
             if (!isNaN(minorCount)) CONFIG.minorVisitorCount = minorCount;
         }
         if (external.startTime !== undefined) CONFIG.startTime = String(external.startTime);
+        if (external.parentRushScrollCalibrationEnabled !== undefined) {
+            CONFIG.parentRushScrollCalibrationEnabled = parseExternalBoolean(external.parentRushScrollCalibrationEnabled, CONFIG.parentRushScrollCalibrationEnabled);
+        }
+        if (external.parentRushScrollWaitCandidates !== undefined) {
+            CONFIG.parentRushScrollWaitCandidates = parseExternalNumberArray(external.parentRushScrollWaitCandidates, CONFIG.parentRushScrollWaitCandidates);
+        }
+        if (external.parentRushScrollRefineStepMs !== undefined) {
+            CONFIG.parentRushScrollRefineStepMs = parseExternalNumber(external.parentRushScrollRefineStepMs, CONFIG.parentRushScrollRefineStepMs);
+        }
+        if (external.parentRushScrollSafetyMs !== undefined) {
+            CONFIG.parentRushScrollSafetyMs = parseExternalNumber(external.parentRushScrollSafetyMs, CONFIG.parentRushScrollSafetyMs);
+        }
+        if (external.parentRushScrollConfirmRuns !== undefined) {
+            CONFIG.parentRushScrollConfirmRuns = parseExternalNumber(external.parentRushScrollConfirmRuns, CONFIG.parentRushScrollConfirmRuns);
+        }
+        if (external.parentRushScrollResetWaitMs !== undefined) {
+            CONFIG.parentRushScrollResetWaitMs = parseExternalNumber(external.parentRushScrollResetWaitMs, CONFIG.parentRushScrollResetWaitMs);
+        }
+        if (external.parentRushScrollMaxTestCandidates !== undefined) {
+            CONFIG.parentRushScrollMaxTestCandidates = parseExternalNumber(external.parentRushScrollMaxTestCandidates, CONFIG.parentRushScrollMaxTestCandidates);
+        }
+        if (external.parentRushMinorFullScrollCalibrationEnabled !== undefined) {
+            CONFIG.parentRushMinorFullScrollCalibrationEnabled = parseExternalBoolean(external.parentRushMinorFullScrollCalibrationEnabled, CONFIG.parentRushMinorFullScrollCalibrationEnabled);
+        }
+        if (external.parentRushClickCalibrationEnabled !== undefined) {
+            CONFIG.parentRushClickCalibrationEnabled = parseExternalBoolean(external.parentRushClickCalibrationEnabled, CONFIG.parentRushClickCalibrationEnabled);
+        }
+        if (external.parentRushClickVerifyWaitMs !== undefined) {
+            CONFIG.parentRushClickVerifyWaitMs = parseExternalNumber(external.parentRushClickVerifyWaitMs, CONFIG.parentRushClickVerifyWaitMs);
+        }
+        if (external.parentRushClickVerifyRetries !== undefined) {
+            CONFIG.parentRushClickVerifyRetries = parseExternalNumber(external.parentRushClickVerifyRetries, CONFIG.parentRushClickVerifyRetries);
+        }
+        if (external.parentAfterAudienceActionMs !== undefined) {
+            var parentAfterAudienceActionMs = parseExternalNumber(external.parentAfterAudienceActionMs, CONFIG.parentAfterAdultClicksMs);
+            CONFIG.parentAfterAdultClicksMs = parentAfterAudienceActionMs;
+            CONFIG.parentAfterMinorClicksMs = parentAfterAudienceActionMs;
+        }
+        if (external.parentAfterAdultClicksMs !== undefined) {
+            CONFIG.parentAfterAdultClicksMs = parseExternalNumber(external.parentAfterAdultClicksMs, CONFIG.parentAfterAdultClicksMs);
+        }
+        if (external.parentAfterMinorClicksMs !== undefined) {
+            CONFIG.parentAfterMinorClicksMs = parseExternalNumber(external.parentAfterMinorClicksMs, CONFIG.parentAfterMinorClicksMs);
+        }
+        if (external.parentRushClickReadyExtraMs !== undefined) {
+            CONFIG.parentRushClickReadyExtraMs = parseExternalNumber(external.parentRushClickReadyExtraMs, CONFIG.parentRushClickReadyExtraMs);
+        }
+        if (external.parentRushActionWaitCandidates !== undefined) {
+            CONFIG.parentRushActionWaitCandidates = parseExternalNumberArray(external.parentRushActionWaitCandidates, CONFIG.parentRushActionWaitCandidates);
+        }
+        if (external.parentRushActionPressCandidates !== undefined) {
+            CONFIG.parentRushActionPressCandidates = parseExternalNumberArray(external.parentRushActionPressCandidates, CONFIG.parentRushActionPressCandidates);
+        }
+        if (external.parentRushActionIntervalCandidates !== undefined) {
+            CONFIG.parentRushActionIntervalCandidates = parseExternalNumberArray(external.parentRushActionIntervalCandidates, CONFIG.parentRushActionIntervalCandidates);
+        }
+        if (external.parentRushActionConfirmRuns !== undefined) {
+            CONFIG.parentRushActionConfirmRuns = parseExternalNumber(external.parentRushActionConfirmRuns, CONFIG.parentRushActionConfirmRuns);
+        }
+        if (external.parentRushCalibrationReuseEnabled !== undefined) {
+            CONFIG.parentRushCalibrationReuseEnabled = parseExternalBoolean(external.parentRushCalibrationReuseEnabled, CONFIG.parentRushCalibrationReuseEnabled);
+        }
+        if (external.parentRushCalibrationReuseClickVerify !== undefined) {
+            CONFIG.parentRushCalibrationReuseClickVerify = parseExternalBoolean(external.parentRushCalibrationReuseClickVerify, CONFIG.parentRushCalibrationReuseClickVerify);
+        }
         if (external.skipFinalSubmit !== undefined && CONFIG.captcha) {
             CONFIG.captcha.skipFinalSubmit = parseExternalBoolean(external.skipFinalSubmit, CONFIG.captcha.skipFinalSubmit);
         }
@@ -286,6 +385,7 @@ var runtime = {
     ocrEnabled: true,
     freshPoints: {},
     freshVisitorPoints: false,
+    parentRushScrollCalibrationFresh: false,
     captchaTemplates: null,
     captchaStats: null,
     captchaSolver: null,
@@ -554,6 +654,13 @@ function gestureLogged(name, x1, y1, x2, y2, duration) {
         swipe(Math.round(x1), Math.round(y1), Math.round(x2), Math.round(y2), duration);
     }
     logx("GESTURE", name + " 完成 cost=" + (Date.now() - start) + "ms");
+}
+
+function isNoopScrollStep(step) {
+    if (!step) return true;
+    if (step.type === "noop" || step.name === "minorAlreadyVisibleAfterAdult") return true;
+    return Math.round(step.startX || 0) === Math.round(step.endX || 0) &&
+        Math.round(step.startY || 0) === Math.round(step.endY || 0);
 }
 
 function joinLocalPath(dir, name) {
@@ -985,6 +1092,8 @@ function logRushPlan(reason) {
         scrollStrategy: runtime.cache.scrollStrategy || null,
         adultScrollStrategy: runtime.cache.adultScrollStrategy || null,
         minorScrollStrategy: runtime.cache.minorScrollStrategy || null,
+        parentRushScrollCalibration: runtime.cache.parentRushScrollCalibration || null,
+        parentRushScrollCalibrationFresh: runtime.parentRushScrollCalibrationFresh === true,
         cachePath: runtime.cachePath,
         collectedAt: runtime.cache.collectedAt || null
     };
@@ -1365,6 +1474,18 @@ function detectSelectedDateCellInGrid(threshold) {
         if (img) { try { img.recycle(); } catch (e) {} }
     }
 }
+
+
+function defaultParentRushPressMs(sectionName) {
+    return sectionName === "adult" ?
+        Math.max(CONFIG.visitorPressDuration, CONFIG.parentAdultPressDuration || 0) :
+        Math.max(CONFIG.visitorPressDuration, CONFIG.parentMinorPressDuration || 0);
+}
+
+function defaultParentRushIntervalMs() {
+    return Math.max(0, CONFIG.visitorIntervalMs || 0);
+}
+
 
 function probeBookingListSentinel(point) {
     var img = null;
@@ -1968,6 +2089,10 @@ function makeGestureScrollStep(name, startX, startY, endX, endY, duration, sourc
 
 function runScrollStep(label, step) {
     if (!step) return;
+    if (isNoopScrollStep(step)) {
+        logx("GESTURE", label + "-" + (step.name || "noop") + " 跳过：当前区域已可见，不发送零距离触摸事件");
+        return;
+    }
     if (step.type === "swipe") {
         swipeLogged(label + "-" + (step.name || "swipe"), step.startX, step.startY, step.endX, step.endY, step.duration);
     } else {
@@ -1985,6 +2110,83 @@ function runScrollStrategy(label, strategy) {
         return;
     }
     runScrollStep(label, strategy);
+}
+
+
+function parentRushCalibrationDefaultWait(sectionName) {
+    if (sectionName === "adult") return Math.max(CONFIG.afterAudienceScrollMs, CONFIG.parentAdultAfterScrollMs || 0);
+    return Math.max(CONFIG.afterAudienceScrollMs, CONFIG.parentMinorAfterScrollMs || 0);
+}
+
+function parentRushCalibrationRegion() {
+    return visiblePersonAreaRegion();
+}
+
+function validateParentDetailTop(label) {
+    var items = ocrRegion(STAGE, label || "parent detail top validate", [0, scaleY(650), device.width, Math.floor(device.height * 0.62)]);
+    var period = findTextItem(items, "选择时段", "top");
+    var adult = findTextItem(items, "成年人信息", "top");
+    var morning = findTextItem(items, "08:30-12:30", "top");
+    var afternoon = findTextItem(items, "12:30-16:30", "top");
+    var periodY = period ? itemRect(period).cy : null;
+    var adultY = adult ? itemRect(adult).cy : null;
+    var ok = !!period || (!!adult && adultY > Math.floor(device.height * 0.55)) || !!morning || !!afternoon;
+    var detail = {
+        ok: ok,
+        periodY: periodY,
+        adultY: adultY,
+        hasMorning: !!morning,
+        hasAfternoon: !!afternoon
+    };
+    logx("CALIB", "detail top validate " + JSON.stringify(detail));
+    return detail;
+}
+
+function restoreParentDetailTopForCalibration(reason) {
+    logx("CALIB", "restore detail top start reason=" + (reason || ""));
+    var step = {
+        name: "restoreDetailTopFullDown",
+        type: "gesture",
+        startX: Math.round(device.width * 0.5),
+        startY: Math.round(device.height * 0.42),
+        endX: Math.round(device.width * 0.5),
+        endY: Math.round(device.height * 0.84),
+        duration: 300,
+        source: "bruteforce-detail-top"
+    };
+    for (var i = 0; i < 2; i++) {
+        runScrollStep("parent calibration restore detail top " + (i + 1), step);
+        sleep(750);
+    }
+    var detail = validateParentDetailTop("parent detail top after restore");
+    if (detail.ok !== true) {
+        logx("CALIB", "restore detail top first pass failed, add extra pulls detail=" + JSON.stringify(detail));
+        for (var j = 0; j < 2; j++) {
+            runScrollStep("parent calibration restore detail top extra " + (j + 1), step);
+            sleep(1000);
+        }
+        detail = validateParentDetailTop("parent detail top after restore extra");
+    }
+    logx("CALIB", "restore detail top done ok=" + detail.ok + " detail=" + JSON.stringify(detail));
+    return detail.ok === true;
+}
+
+function parentRushActionInfo(sectionName) {
+    var all = runtime.cache.parentRushScrollCalibration || {};
+    var info = all[sectionName];
+    return info && info.verified === true && info.clickVerified === true ? info : null;
+}
+
+function parentRushPressDuration(sectionName) {
+    var info = parentRushActionInfo(sectionName);
+    if (info && typeof info.actionPressMs === "number" && info.actionPressMs >= 0) return info.actionPressMs;
+    return defaultParentRushPressMs(sectionName);
+}
+
+function parentRushIntervalMs(sectionName) {
+    var info = parentRushActionInfo(sectionName);
+    if (info && typeof info.actionIntervalMs === "number" && info.actionIntervalMs >= 0) return info.actionIntervalMs;
+    return defaultParentRushIntervalMs();
 }
 
 function parentTitleAlignMinEndY() {
@@ -2058,6 +2260,37 @@ function collectVisibleCredentialRowPoints(sectionName) {
     return points;
 }
 
+function parentSelectPointsFromCredentialPoints(points, limit, suffix) {
+    var selected = [];
+    var count = typeof limit === "number" ? limit : points.length;
+    for (var i = 0; i < points.length && selected.length < count; i++) {
+        var p = points[i];
+        var source = p.source || "unknown";
+        var tag = suffix || "parentSelect";
+        if (source.indexOf(":" + tag) < 0) source += ":" + tag;
+        var keepCalibratedClick = typeof p.verifyY === "number" ||
+            source.indexOf("probe:") === 0 ||
+            source.indexOf("infer:card") === 0 ||
+            source.indexOf("infer:checkbox") === 0;
+        var point = makePoint(p.x, p.y, source);
+        if (!keepCalibratedClick && point.source.indexOf(":conservative") < 0) {
+            point.source += ":conservative";
+        }
+        if (typeof p.verifyX === "number") point.verifyX = p.verifyX;
+        if (typeof p.verifyY === "number") point.verifyY = p.verifyY;
+        selected.push(point);
+    }
+    return selected;
+}
+
+function adultSelectPointsFromCredentialPoints(points, limit) {
+    return parentSelectPointsFromCredentialPoints(points, limit, "adultSelect");
+}
+
+function minorSelectPointsFromCredentialPoints(points, limit) {
+    return parentSelectPointsFromCredentialPoints(points, limit, "minorSelect");
+}
+
 function collectMinorPointsVisibleAfterAdultTop(visiblePoints) {
     var minorTitle = findMinorTitleOnCurrentPage("minor title boundary after adult top");
     if (!minorTitle) {
@@ -2076,7 +2309,7 @@ function collectMinorPointsVisibleAfterAdultTop(visiblePoints) {
         return null;
     }
     logx("CACHE", "minor rows collected below visible minor title count=" + points.length + " minorTitleY=" + minorTitle.y);
-    return points.slice(0, CONFIG.minorVisitorCount);
+    return minorSelectPointsFromCredentialPoints(points, CONFIG.minorVisitorCount);
 }
 
 function assertCurrentParentSection(sectionName) {
@@ -2164,17 +2397,21 @@ function estimateMinorTitleAfterAdultTop() {
 }
 
 function collectAdultSectionPointsForPrepare(adultTitle) {
-    setCacheValue("adultScrollStrategy", buildParentAdultRushScrollStrategy(adultTitle));
-    alignTitleToTopForPrepare(adultTitle, "adultTitleAlign", "prep-adult-title");
+    var adultStrategy = buildParentAdultRushScrollStrategy(adultTitle);
+    setCacheValue("adultScrollStrategy", adultStrategy);
+    logx("CALIB", "parent prepare adult skip scroll/click exploration; use fixed wait=" + parentRushCalibrationDefaultWait("adult"));
+    restoreParentDetailTopForCalibration("adult-calibration-fallback");
+    runScrollStrategy("第一轮成年人保守拖顶", adultStrategy);
+    sleep(parentRushCalibrationDefaultWait("adult"));
     if (!assertCurrentParentSection("adult")) {
         fail("成年人信息拖顶后已进入未成年人区，停止写入错误成人缓存");
     }
 
     var visiblePoints = collectVisibleCredentialRowPoints("parentVisibleAfterAdult");
-    var adultPoints = visiblePoints.slice(0, CONFIG.visitorCount);
+    var adultPoints = adultSelectPointsFromCredentialPoints(visiblePoints.slice(0, CONFIG.visitorCount), CONFIG.visitorCount);
     if (adultPoints.length < CONFIG.visitorCount) {
         logx("WARN", "成人区可见证件类型行不足，将补足 adult 点 required=" + CONFIG.visitorCount + " actual=" + adultPoints.length);
-        adultPoints = collectPersonCardPointsFromCredentialRows("adult", CONFIG.visitorCount).slice(0, CONFIG.visitorCount);
+        adultPoints = adultSelectPointsFromCredentialPoints(collectPersonCardPointsFromCredentialRows("adult", CONFIG.visitorCount), CONFIG.visitorCount);
     }
     runtime.cache.adultPrepPoints = adultPoints;
     runtime.cache.adultRushPoints = adultPoints;
@@ -2189,15 +2426,16 @@ function collectAdultSectionPointsForPrepare(adultTitle) {
         runtime.cache.minorRushPoints = minorPoints;
         setCacheValue("minorScrollStrategy", {
             name: "minorAlreadyVisibleAfterAdult",
-            type: "gesture",
+            type: "noop",
             startX: Math.round(device.width * 0.5),
             startY: Math.round(device.height * 0.78),
             endX: Math.round(device.width * 0.5),
             endY: Math.round(device.height * 0.78),
-            duration: 1,
+            duration: 0,
             source: "visible-after-adult"
         });
         setCacheValue("minorAlreadyCollectedAfterAdult", true);
+        logx("FLOW", "未成年人信息已在成年人拖顶后可见且数量满足配置，第二轮不需要也不应执行未成年人区滑动");
         logx("CACHE", "成年人拖顶后已采够成人+未成年人，跳过未成年人第二次拖动 totalVisible=" + visiblePoints.length + " totalNeeded=" + totalNeeded);
         logx("CACHE", "minorPrepPoints 写入 " + JSON.stringify(minorPoints));
         logx("CACHE", "minorRushPoints 写入 " + JSON.stringify(minorPoints));
@@ -2261,6 +2499,11 @@ function collectParentAudienceAndPeriodPoints() {
     }
 
     collectAdultSectionPointsForPrepare(adultTitle);
+    var adultCalibrationInfo = runtime.cache.parentRushScrollCalibration && runtime.cache.parentRushScrollCalibration.adult;
+    if (adultCalibrationInfo && adultCalibrationInfo.clickVerified === false) {
+        logx("CALIB", "adult click calibration failed; skip minor fast calibration and use conservative minor collect");
+        setCacheValue("minorAlreadyCollectedAfterAdult", false);
+    }
     if (runtime.cache.minorAlreadyCollectedAfterAdult === true) {
         logx("FLOW", "未成年人点已在成年人拖顶后采集完成，跳过未成年人区拖动采集");
     } else {
@@ -2363,15 +2606,16 @@ function collectMinorVisitorPointsForPrepare() {
 
     var strategy = buildParentMinorRushScrollStrategy(title, title.source.indexOf("infer:") === 0 ? "minor-title-estimated-after-adult" : "minor-title-visible-after-adult");
     setCacheValue("minorScrollStrategy", strategy);
+    logx("CALIB", "parent prepare minor skip scroll/click exploration; use fixed wait=" + parentRushCalibrationDefaultWait("minor"));
     if (strategy && strategy.duration > 1) {
         runScrollStep("第一轮标题拖顶", strategy);
-        sleep(700);
+        sleep(parentRushCalibrationDefaultWait("minor"));
     }
 
     if (!assertCurrentParentSection("minor")) {
         fail("未成年人信息拖顶后未确认进入未成年人区，停止写入错误未成年人缓存");
     }
-    var prepPoints = collectPersonCardPointsFromCredentialRows("minor", CONFIG.minorVisitorCount);
+    var prepPoints = minorSelectPointsFromCredentialPoints(collectPersonCardPointsFromCredentialRows("minor", CONFIG.minorVisitorCount), CONFIG.minorVisitorCount);
     runtime.cache.minorPrepPoints = prepPoints;
     runtime.cache.minorRushPoints = prepPoints;
     runtime.freshVisitorPoints = true;
@@ -2416,16 +2660,72 @@ function scrollToMinorForRush() {
         duration: 180,
         source: "default-screen-ratio"
     };
+    if (isNoopScrollStep(strategy)) {
+        logx("RUSH", "未成年人信息已在成年人拖顶后可见，第二轮不执行未成年人区滑动 strategy=" + (strategy.name || strategy.type || "noop"));
+        return strategy;
+    }
     runScrollStrategy("滑动到未成年人信息", strategy);
     return strategy;
 }
 
+function parentRushCalibratedPointsForRush(sectionName, requiredCount) {
+    var all = runtime.cache.parentRushScrollCalibration || {};
+    var info = all[sectionName];
+    if (!info) {
+        logx("CALIB", "rush points skip calibrated section=" + sectionName + " reason=missing-info");
+        return null;
+    }
+    if (info.verified !== true || info.clickVerified !== true) {
+        logx("CALIB", "rush points skip calibrated section=" + sectionName + " reason=not-click-verified");
+        return null;
+    }
+    if (!info.points || info.points.length < requiredCount) {
+        logx("CALIB", "rush points skip calibrated section=" + sectionName + " reason=point-count-insufficient actual=" +
+            (info.points ? info.points.length : 0) + " required=" + requiredCount);
+        return null;
+    }
+    if (info.exhibitMode && info.exhibitMode !== CONFIG.exhibitMode) {
+        logx("CALIB", "rush points skip calibrated section=" + sectionName + " reason=exhibit-mismatch cached=" +
+            info.exhibitMode + " current=" + CONFIG.exhibitMode);
+        return null;
+    }
+    if (info.bookingType && info.bookingType !== currentBookingCacheType()) {
+        logx("CALIB", "rush points skip calibrated section=" + sectionName + " reason=bookingType-mismatch cached=" +
+            info.bookingType + " current=" + currentBookingCacheType());
+        return null;
+    }
+    if (info.screen && (info.screen.width !== device.width || info.screen.height !== device.height)) {
+        logx("CALIB", "rush points skip calibrated section=" + sectionName + " reason=screen-mismatch cached=" +
+            info.screen.width + "x" + info.screen.height + " current=" + device.width + "x" + device.height);
+        return null;
+    }
+    var currentLayoutMode = runtime.cache.prepareDetailLayoutMode || "";
+    if (info.layoutMode && currentLayoutMode && info.layoutMode !== currentLayoutMode) {
+        logx("CALIB", "rush points skip calibrated section=" + sectionName + " reason=layout-mismatch cached=" +
+            info.layoutMode + " current=" + currentLayoutMode);
+        return null;
+    }
+    var selected = sectionName === "adult"
+        ? adultSelectPointsFromCredentialPoints(info.points, requiredCount)
+        : minorSelectPointsFromCredentialPoints(info.points, requiredCount);
+    logx("CALIB", "rush points use calibrated section=" + sectionName + " count=" + selected.length +
+        " first=" + (selected[0] ? pointText(selected[0]) : "null") +
+        " savedAt=" + (info.reuseSavedAt || info.savedAt || runtime.cache.collectedAt || ""));
+    return selected;
+}
+
 function getAdultPointsForRush() {
+    var calibrated = parentRushCalibratedPointsForRush("adult", CONFIG.visitorCount);
+    if (calibrated) {
+        runtime.cache.adultRushPoints = calibrated;
+        return calibrated;
+    }
     if (runtime.cache.adultRushPoints && runtime.cache.adultRushPoints.length >= CONFIG.visitorCount && (runtime.cache.__screenMatched || runtime.freshVisitorPoints)) {
-        logx("CACHE", "adultRushPoints 命中 count=" + runtime.cache.adultRushPoints.length);
+        runtime.cache.adultRushPoints = adultSelectPointsFromCredentialPoints(runtime.cache.adultRushPoints, CONFIG.visitorCount);
+        logx("CACHE", "adultRushPoints 命中 count=" + runtime.cache.adultRushPoints.length + " first=" + (runtime.cache.adultRushPoints[0] ? pointText(runtime.cache.adultRushPoints[0]) : "null"));
         return runtime.cache.adultRushPoints;
     }
-    var points = collectPersonCardPointsFromCredentialRows("adult-rush", CONFIG.visitorCount);
+    var points = adultSelectPointsFromCredentialPoints(collectPersonCardPointsFromCredentialRows("adult-rush", CONFIG.visitorCount), CONFIG.visitorCount);
     runtime.cache.adultRushPoints = points;
     runtime.freshVisitorPoints = true;
     logx("CACHE", "adultRushPoints 实时OCR写入 " + JSON.stringify(points));
@@ -2433,11 +2733,17 @@ function getAdultPointsForRush() {
 }
 
 function getMinorPointsForRush() {
+    var calibrated = parentRushCalibratedPointsForRush("minor", CONFIG.minorVisitorCount);
+    if (calibrated) {
+        runtime.cache.minorRushPoints = calibrated;
+        return calibrated;
+    }
     if (runtime.cache.minorRushPoints && runtime.cache.minorRushPoints.length >= CONFIG.minorVisitorCount && (runtime.cache.__screenMatched || runtime.freshVisitorPoints)) {
-        logx("CACHE", "minorRushPoints 命中 count=" + runtime.cache.minorRushPoints.length);
+        runtime.cache.minorRushPoints = minorSelectPointsFromCredentialPoints(runtime.cache.minorRushPoints, CONFIG.minorVisitorCount);
+        logx("CACHE", "minorRushPoints 命中 count=" + runtime.cache.minorRushPoints.length + " first=" + (runtime.cache.minorRushPoints[0] ? pointText(runtime.cache.minorRushPoints[0]) : "null"));
         return runtime.cache.minorRushPoints;
     }
-    var points = collectPersonCardPointsFromCredentialRows("minor-rush", CONFIG.minorVisitorCount);
+    var points = minorSelectPointsFromCredentialPoints(collectPersonCardPointsFromCredentialRows("minor-rush", CONFIG.minorVisitorCount), CONFIG.minorVisitorCount);
     runtime.cache.minorRushPoints = points;
     runtime.freshVisitorPoints = true;
     logx("CACHE", "minorRushPoints 实时OCR写入 " + JSON.stringify(points));
@@ -2942,26 +3248,51 @@ function rushFlow() {
     sleep(120);
 
     if (isParentBookingMode()) {
-        scrollToAdultForRush();
-        sleep(Math.max(CONFIG.afterAudienceScrollMs, CONFIG.parentAdultAfterScrollMs || 0));
+        var adultScrollStrategy = scrollToAdultForRush();
+        var adultFixedWaitMs = parentRushCalibrationDefaultWait("adult");
+        logx("RUSH", "亲子成年人滑动后固定等待 wait=" + adultFixedWaitMs + "ms strategy=" + (adultScrollStrategy ? adultScrollStrategy.name || "" : ""));
+        sleep(adultFixedWaitMs);
 
         var adultPoints = getAdultPointsForRush();
+        var adultPressMs = parentRushPressDuration("adult");
+        var adultIntervalMs = parentRushIntervalMs("adult");
         for (var ai = 0; ai < CONFIG.visitorCount; ai++) {
             var ap = adultPoints[ai];
-            pressPoint("成人 " + (ai + 1), ap, Math.max(CONFIG.visitorPressDuration, CONFIG.parentAdultPressDuration || 0));
-            sleep(CONFIG.visitorIntervalMs);
+            pressPoint("成人 " + (ai + 1), ap, adultPressMs);
+            sleep(adultIntervalMs);
+        }
+        if (CONFIG.visitorCount > 0) {
+            var afterAdultWaitMs = Math.max(0, CONFIG.parentAfterAdultClicksMs || 0);
+            if (afterAdultWaitMs > 0) {
+                logx("RUSH", "亲子未成年人滑动前等待 afterAdultClicks=" + afterAdultWaitMs + "ms");
+                sleep(afterAdultWaitMs);
+            }
         }
 
         var minorScrollStrategy = scrollToMinorForRush();
-        if (!(minorScrollStrategy && minorScrollStrategy.duration <= 1)) {
-            sleep(Math.max(CONFIG.afterAudienceScrollMs, CONFIG.parentMinorAfterScrollMs || 0));
+        var minorNoopScroll = isNoopScrollStep(minorScrollStrategy);
+        var minorFixedWaitMs = minorNoopScroll ? 0 : parentRushCalibrationDefaultWait("minor");
+        if (minorFixedWaitMs > 0) {
+            logx("RUSH", "亲子未成年人滑动后固定等待 wait=" + minorFixedWaitMs + "ms strategy=" + (minorScrollStrategy ? minorScrollStrategy.name || "" : ""));
+            sleep(minorFixedWaitMs);
+        } else {
+            logx("RUSH", "亲子未成年人区无需滑动，跳过滑动稳定等待 strategy=" + (minorScrollStrategy ? minorScrollStrategy.name || minorScrollStrategy.type || "" : ""));
         }
 
         var minorPoints = getMinorPointsForRush();
+        var minorPressMs = parentRushPressDuration("minor");
+        var minorIntervalMs = parentRushIntervalMs("minor");
         for (var mi = 0; mi < CONFIG.minorVisitorCount; mi++) {
             var mp = minorPoints[mi];
-            pressPoint("未成年人 " + (mi + 1), mp, Math.max(CONFIG.visitorPressDuration, CONFIG.parentMinorPressDuration || 0));
-            sleep(CONFIG.visitorIntervalMs);
+            pressPoint("未成年人 " + (mi + 1), mp, minorPressMs);
+            sleep(minorIntervalMs);
+        }
+        if (CONFIG.minorVisitorCount > 0) {
+            var confirmReadyWaitMs = Math.max(0, CONFIG.parentAfterMinorClicksMs || 0);
+            if (confirmReadyWaitMs > 0) {
+                logx("RUSH", "亲子确认前等待 afterMinorClicks=" + confirmReadyWaitMs + "ms");
+                sleep(confirmReadyWaitMs);
+            }
         }
     } else {
         scrollToAudienceForRush();
