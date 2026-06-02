@@ -2354,12 +2354,41 @@ function collectMinorPointsVisibleAfterAdultTop(visiblePoints) {
     return minorSelectPointsFromCredentialPoints(tagMinorTitleBoundaryPoints(points, minorTitle, "visibleAfterAdultTitle"), CONFIG.minorVisitorCount);
 }
 
+function collectAdultPointsVisibleBeforeMinorTitle(visiblePoints, requiredCount) {
+    var minorTitle = findMinorTitleOnCurrentPage("adult visible minor title boundary after adult top");
+    if (!minorTitle) {
+        return { foundBoundary: false, points: null };
+    }
+    var maxY = minorTitle.y - scaleY(45);
+    var points = [];
+    for (var i = 0; i < visiblePoints.length; i++) {
+        if (visiblePoints[i].y < maxY) {
+            points.push(visiblePoints[i]);
+        } else {
+            logx("CACHE", "adult 过滤未成年人标题下方证件行 " + pointText(visiblePoints[i]) + " minorTitleY=" + minorTitle.y);
+        }
+    }
+    if (points.length < requiredCount) {
+        logx("WARN", "adult 未成年人标题上方证件行不足 required=" + requiredCount + " actual=" + points.length + " minorTitleY=" + minorTitle.y);
+        return { foundBoundary: true, points: [] };
+    }
+    logx("CACHE", "adult 按未成年人标题边界采集成人证件行成功 count=" + points.length + " minorTitleY=" + minorTitle.y);
+    return {
+        foundBoundary: true,
+        points: adultSelectPointsFromCredentialPoints(points, requiredCount)
+    };
+}
+
 function assertCurrentParentSection(sectionName) {
     var items = ocrRegion(STAGE, "确认当前亲子人员区-" + sectionName, [0, scaleY(250), device.width, Math.floor(device.height * 0.48)]);
     var adult = findTextItem(items, "成人信息", "top");
     var minor = findTextItem(items, "未成年人信息", "top");
     if (sectionName === "adult" && minor) {
-        logx("WARN", "当前页面已到未成年人信息区，不能采集 adult 点，疑似成年人标题拖顶过量");
+        if (adult) {
+            logx("WARN", "当前页面成年人和未成年人区同时可见，将按未成年人标题边界采集 adult 点");
+            return true;
+        }
+        logx("WARN", "当前页面已到未成年人信息区且未确认成年人标题，不能采集 adult 点，疑似成年人标题拖顶过量");
         return false;
     }
     if (sectionName === "adult" && !adult) {
@@ -2450,7 +2479,13 @@ function collectAdultSectionPointsForPrepare(adultTitle) {
     }
 
     var visiblePoints = collectVisibleCredentialRowPoints("parentVisibleAfterAdult");
-    var adultPoints = adultSelectPointsFromCredentialPoints(visiblePoints.slice(0, CONFIG.visitorCount), CONFIG.visitorCount);
+    var adultBoundary = collectAdultPointsVisibleBeforeMinorTitle(visiblePoints, CONFIG.visitorCount);
+    var adultPoints = adultBoundary.foundBoundary
+        ? adultBoundary.points
+        : adultSelectPointsFromCredentialPoints(visiblePoints.slice(0, CONFIG.visitorCount), CONFIG.visitorCount);
+    if (adultPoints.length < CONFIG.visitorCount && adultBoundary.foundBoundary) {
+        fail("成年人标题下方、未成年人标题上方证件行不足，停止写入错误成人缓存");
+    }
     if (adultPoints.length < CONFIG.visitorCount) {
         logx("WARN", "成人区可见证件类型行不足，将补足 adult 点 required=" + CONFIG.visitorCount + " actual=" + adultPoints.length);
         adultPoints = adultSelectPointsFromCredentialPoints(collectPersonCardPointsFromCredentialRows("adult", CONFIG.visitorCount), CONFIG.visitorCount);
