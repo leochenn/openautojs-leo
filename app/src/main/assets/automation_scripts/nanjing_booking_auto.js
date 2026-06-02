@@ -34,24 +34,8 @@ var CONFIG = {
     parentMinorAfterScrollMs: 1000, // 亲子未成年人区固定等待；预热阶段不再探索滑动最短稳定时间
     parentAfterAdultClicksMs: 100, // 亲子模式：成年人最后一次点击后，进入未成年人区前的固定等待
     parentAfterMinorClicksMs: 100, // 亲子模式：未成年人最后一次点击后，点击确认预约前的固定等待
-    parentRushScrollCalibrationEnabled: true, // 亲子第二轮专用：第一轮预热中自测滑动后最短稳定等待
-    parentRushScrollWaitCandidates: [500, 300, 200],
-    parentRushScrollResetWaitMs: 450,
-    parentRushScrollMaxTestCandidates: 5,
-    parentRushMinorFullScrollCalibrationEnabled: false, // 未成年人区滑动已由成年人阶段标题定位确定，默认只做一次稳定验证
-    parentRushClickCalibrationEnabled: true,
-    parentRushClickVerifyWaitMs: 160,
-    parentRushClickVerifyRetries: 2,
-    parentRushClickReadyExtraMs: 740, // 亲子第二轮：滑动 OCR 可见后到可稳定点击仍需额外等 WebView 停稳，按预热验证链路保守补偿
-    parentRushActionWaitCandidates: [260, 360, 500, 700, 1000],
-    parentRushActionPressCandidates: [60, 80, 120],
-    parentRushActionIntervalCandidates: [20, 40, 80],
-    parentRushActionConfirmRuns: 1,
-    parentRushCalibrationReuseEnabled: true,
-    parentRushCalibrationReuseClickVerify: true,
     afterAudienceScrollMs: 700, // 第二轮滑动到观众信息后的等待时间；等 WebView/小程序滚动停稳后再点游客，这个值会影响滑动后的点击
     visitorIntervalMs: 80, // 第二轮连续勾选多个游客之间的间隔；避免游客卡片状态更新时吞掉后续点击
-    afterConfirmCaptchaWaitMs: 800, // 第二轮点击确认预约后等待验证码弹窗渲染的时间；与 Mock 测试脚本保持一致
     noticePressDuration: 20, // 预约须知、登录协议等提示弹窗按钮的点击按压时长
     pageWaitInterval: 250, // OCR 等待循环的轮询间隔；页面识别未命中时每隔该时间重试
     finalToastHoldMs: 2200, // 脚本结束最后 toast 的保留等待时间；仅影响结束提示，不影响抢票链路
@@ -297,39 +281,6 @@ function applyExternalBookingConfig() {
             if (!isNaN(minorCount)) CONFIG.minorVisitorCount = minorCount;
         }
         if (external.startTime !== undefined) CONFIG.startTime = String(external.startTime);
-        if (external.parentRushScrollCalibrationEnabled !== undefined) {
-            CONFIG.parentRushScrollCalibrationEnabled = parseExternalBoolean(external.parentRushScrollCalibrationEnabled, CONFIG.parentRushScrollCalibrationEnabled);
-        }
-        if (external.parentRushScrollWaitCandidates !== undefined) {
-            CONFIG.parentRushScrollWaitCandidates = parseExternalNumberArray(external.parentRushScrollWaitCandidates, CONFIG.parentRushScrollWaitCandidates);
-        }
-        if (external.parentRushScrollRefineStepMs !== undefined) {
-            CONFIG.parentRushScrollRefineStepMs = parseExternalNumber(external.parentRushScrollRefineStepMs, CONFIG.parentRushScrollRefineStepMs);
-        }
-        if (external.parentRushScrollSafetyMs !== undefined) {
-            CONFIG.parentRushScrollSafetyMs = parseExternalNumber(external.parentRushScrollSafetyMs, CONFIG.parentRushScrollSafetyMs);
-        }
-        if (external.parentRushScrollConfirmRuns !== undefined) {
-            CONFIG.parentRushScrollConfirmRuns = parseExternalNumber(external.parentRushScrollConfirmRuns, CONFIG.parentRushScrollConfirmRuns);
-        }
-        if (external.parentRushScrollResetWaitMs !== undefined) {
-            CONFIG.parentRushScrollResetWaitMs = parseExternalNumber(external.parentRushScrollResetWaitMs, CONFIG.parentRushScrollResetWaitMs);
-        }
-        if (external.parentRushScrollMaxTestCandidates !== undefined) {
-            CONFIG.parentRushScrollMaxTestCandidates = parseExternalNumber(external.parentRushScrollMaxTestCandidates, CONFIG.parentRushScrollMaxTestCandidates);
-        }
-        if (external.parentRushMinorFullScrollCalibrationEnabled !== undefined) {
-            CONFIG.parentRushMinorFullScrollCalibrationEnabled = parseExternalBoolean(external.parentRushMinorFullScrollCalibrationEnabled, CONFIG.parentRushMinorFullScrollCalibrationEnabled);
-        }
-        if (external.parentRushClickCalibrationEnabled !== undefined) {
-            CONFIG.parentRushClickCalibrationEnabled = parseExternalBoolean(external.parentRushClickCalibrationEnabled, CONFIG.parentRushClickCalibrationEnabled);
-        }
-        if (external.parentRushClickVerifyWaitMs !== undefined) {
-            CONFIG.parentRushClickVerifyWaitMs = parseExternalNumber(external.parentRushClickVerifyWaitMs, CONFIG.parentRushClickVerifyWaitMs);
-        }
-        if (external.parentRushClickVerifyRetries !== undefined) {
-            CONFIG.parentRushClickVerifyRetries = parseExternalNumber(external.parentRushClickVerifyRetries, CONFIG.parentRushClickVerifyRetries);
-        }
         if (external.parentAfterAudienceActionMs !== undefined) {
             var parentAfterAudienceActionMs = parseExternalNumber(external.parentAfterAudienceActionMs, CONFIG.parentAfterAdultClicksMs);
             CONFIG.parentAfterAdultClicksMs = parentAfterAudienceActionMs;
@@ -340,27 +291,6 @@ function applyExternalBookingConfig() {
         }
         if (external.parentAfterMinorClicksMs !== undefined) {
             CONFIG.parentAfterMinorClicksMs = parseExternalNumber(external.parentAfterMinorClicksMs, CONFIG.parentAfterMinorClicksMs);
-        }
-        if (external.parentRushClickReadyExtraMs !== undefined) {
-            CONFIG.parentRushClickReadyExtraMs = parseExternalNumber(external.parentRushClickReadyExtraMs, CONFIG.parentRushClickReadyExtraMs);
-        }
-        if (external.parentRushActionWaitCandidates !== undefined) {
-            CONFIG.parentRushActionWaitCandidates = parseExternalNumberArray(external.parentRushActionWaitCandidates, CONFIG.parentRushActionWaitCandidates);
-        }
-        if (external.parentRushActionPressCandidates !== undefined) {
-            CONFIG.parentRushActionPressCandidates = parseExternalNumberArray(external.parentRushActionPressCandidates, CONFIG.parentRushActionPressCandidates);
-        }
-        if (external.parentRushActionIntervalCandidates !== undefined) {
-            CONFIG.parentRushActionIntervalCandidates = parseExternalNumberArray(external.parentRushActionIntervalCandidates, CONFIG.parentRushActionIntervalCandidates);
-        }
-        if (external.parentRushActionConfirmRuns !== undefined) {
-            CONFIG.parentRushActionConfirmRuns = parseExternalNumber(external.parentRushActionConfirmRuns, CONFIG.parentRushActionConfirmRuns);
-        }
-        if (external.parentRushCalibrationReuseEnabled !== undefined) {
-            CONFIG.parentRushCalibrationReuseEnabled = parseExternalBoolean(external.parentRushCalibrationReuseEnabled, CONFIG.parentRushCalibrationReuseEnabled);
-        }
-        if (external.parentRushCalibrationReuseClickVerify !== undefined) {
-            CONFIG.parentRushCalibrationReuseClickVerify = parseExternalBoolean(external.parentRushCalibrationReuseClickVerify, CONFIG.parentRushCalibrationReuseClickVerify);
         }
         if (external.skipFinalSubmit !== undefined && CONFIG.captcha) {
             CONFIG.captcha.skipFinalSubmit = parseExternalBoolean(external.skipFinalSubmit, CONFIG.captcha.skipFinalSubmit);

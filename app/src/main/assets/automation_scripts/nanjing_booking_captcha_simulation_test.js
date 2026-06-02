@@ -113,7 +113,6 @@ function loadSimulationConfig() {
     var objectText = extractObjectLiteralAfter(code, "var CONFIG =");
     var config = eval("(" + objectText + ")");
     config.outputDir = SIMULATION_OUTPUT_DIR;
-    config.afterConfirmCaptchaWaitMs = 0;
     config.captcha = config.captcha || {};
     config.captcha.moduleFileName = config.captcha.moduleFileName || "nanjing_booking_captcha_solver.js";
     config.captcha.saveSceneBeforeSolve = false;
