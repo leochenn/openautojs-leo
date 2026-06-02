@@ -2208,6 +2208,7 @@ function parentSelectPointsFromCredentialPoints(points, limit, suffix) {
         }
         if (typeof p.verifyX === "number") point.verifyX = p.verifyX;
         if (typeof p.verifyY === "number") point.verifyY = p.verifyY;
+        if (typeof p.minorTitleY === "number") point.minorTitleY = p.minorTitleY;
         selected.push(point);
     }
     return selected;
@@ -2219,6 +2220,55 @@ function adultSelectPointsFromCredentialPoints(points, limit) {
 
 function minorSelectPointsFromCredentialPoints(points, limit) {
     return parentSelectPointsFromCredentialPoints(points, limit, "minorSelect");
+}
+
+function tagMinorTitleBoundaryPoints(points, minorTitle, tag) {
+    var tagged = [];
+    var titleY = minorTitle ? Math.round(minorTitle.y) : null;
+    for (var i = 0; i < points.length; i++) {
+        var p = points[i];
+        var source = p.source || "minorCredentialRow";
+        if (source.indexOf(":minorTitleBoundary") < 0) source += ":minorTitleBoundary";
+        if (tag && source.indexOf(":" + tag) < 0) source += ":" + tag;
+        var point = makePoint(p.x, p.y, source);
+        if (titleY !== null) point.minorTitleY = titleY;
+        tagged.push(point);
+    }
+    return tagged;
+}
+
+function areMinorTitleBoundaryPoints(points, requiredCount) {
+    if (!points || points.length < requiredCount) return false;
+    for (var i = 0; i < requiredCount; i++) {
+        var source = points[i] && points[i].source || "";
+        if (source.indexOf(":minorTitleBoundary") < 0) return false;
+    }
+    return true;
+}
+
+function collectMinorCredentialRowPointsBelowCurrentTitle(sectionName, requiredCount) {
+    var minorTitle = findMinorTitleOnCurrentPage(sectionName + " minor title boundary");
+    if (!minorTitle) {
+        logx("WARN", sectionName + " 未找到未成年人信息标题，拒绝采集未成年人点位，避免误点成年人行");
+        return [];
+    }
+    var minTitleGap = scaleY(45);
+    var minY = minorTitle.y + minTitleGap;
+    var visiblePoints = collectVisibleCredentialRowPoints(sectionName);
+    var points = [];
+    for (var i = 0; i < visiblePoints.length; i++) {
+        if (visiblePoints[i].y > minY) {
+            points.push(visiblePoints[i]);
+        } else {
+            logx("CACHE", sectionName + " 过滤未成年人标题上方证件行 " + pointText(visiblePoints[i]) + " minorTitleY=" + minorTitle.y);
+        }
+    }
+    if (points.length < requiredCount) {
+        logx("WARN", sectionName + " 未成年人标题下方证件行不足 required=" + requiredCount + " actual=" + points.length + " minorTitleY=" + minorTitle.y);
+    } else {
+        logx("CACHE", sectionName + " 未成年人标题下方证件行采集成功 count=" + points.length + " minorTitleY=" + minorTitle.y);
+    }
+    return tagMinorTitleBoundaryPoints(points, minorTitle, "belowMinorTitle");
 }
 
 function collectMinorPointsVisibleAfterAdultTop(visiblePoints) {
@@ -2239,7 +2289,7 @@ function collectMinorPointsVisibleAfterAdultTop(visiblePoints) {
         return null;
     }
     logx("CACHE", "minor rows collected below visible minor title count=" + points.length + " minorTitleY=" + minorTitle.y);
-    return minorSelectPointsFromCredentialPoints(points, CONFIG.minorVisitorCount);
+    return minorSelectPointsFromCredentialPoints(tagMinorTitleBoundaryPoints(points, minorTitle, "visibleAfterAdultTitle"), CONFIG.minorVisitorCount);
 }
 
 function assertCurrentParentSection(sectionName) {
@@ -2545,7 +2595,11 @@ function collectMinorVisitorPointsForPrepare() {
     if (!assertCurrentParentSection("minor")) {
         fail("未成年人信息拖顶后未确认进入未成年人区，停止写入错误未成年人缓存");
     }
-    var prepPoints = minorSelectPointsFromCredentialPoints(collectPersonCardPointsFromCredentialRows("minor", CONFIG.minorVisitorCount), CONFIG.minorVisitorCount);
+    var minorRows = collectMinorCredentialRowPointsBelowCurrentTitle("minor", CONFIG.minorVisitorCount);
+    if (minorRows.length < CONFIG.minorVisitorCount) {
+        fail("未成年人标题下方证件行不足，停止写入未成年人点位，避免误点成年人行");
+    }
+    var prepPoints = minorSelectPointsFromCredentialPoints(minorRows, CONFIG.minorVisitorCount);
     runtime.cache.minorPrepPoints = prepPoints;
     runtime.cache.minorRushPoints = prepPoints;
     runtime.freshVisitorPoints = true;
@@ -2669,11 +2723,18 @@ function getMinorPointsForRush() {
         return calibrated;
     }
     if (runtime.cache.minorRushPoints && runtime.cache.minorRushPoints.length >= CONFIG.minorVisitorCount && (runtime.cache.__screenMatched || runtime.freshVisitorPoints)) {
-        runtime.cache.minorRushPoints = minorSelectPointsFromCredentialPoints(runtime.cache.minorRushPoints, CONFIG.minorVisitorCount);
-        logx("CACHE", "minorRushPoints 命中 count=" + runtime.cache.minorRushPoints.length + " first=" + (runtime.cache.minorRushPoints[0] ? pointText(runtime.cache.minorRushPoints[0]) : "null"));
-        return runtime.cache.minorRushPoints;
+        if (areMinorTitleBoundaryPoints(runtime.cache.minorRushPoints, CONFIG.minorVisitorCount)) {
+            runtime.cache.minorRushPoints = minorSelectPointsFromCredentialPoints(runtime.cache.minorRushPoints, CONFIG.minorVisitorCount);
+            logx("CACHE", "minorRushPoints 命中 count=" + runtime.cache.minorRushPoints.length + " first=" + (runtime.cache.minorRushPoints[0] ? pointText(runtime.cache.minorRushPoints[0]) : "null"));
+            return runtime.cache.minorRushPoints;
+        }
+        logx("CACHE", "minorRushPoints 跳过旧缓存 reason=missing-minor-title-boundary count=" + runtime.cache.minorRushPoints.length);
     }
-    var points = minorSelectPointsFromCredentialPoints(collectPersonCardPointsFromCredentialRows("minor-rush", CONFIG.minorVisitorCount), CONFIG.minorVisitorCount);
+    var minorRows = collectMinorCredentialRowPointsBelowCurrentTitle("minor-rush", CONFIG.minorVisitorCount);
+    if (minorRows.length < CONFIG.minorVisitorCount) {
+        fail("第二轮未成年人标题下方证件行不足，停止点击未成年人，避免误点成年人行");
+    }
+    var points = minorSelectPointsFromCredentialPoints(minorRows, CONFIG.minorVisitorCount);
     runtime.cache.minorRushPoints = points;
     runtime.freshVisitorPoints = true;
     logx("CACHE", "minorRushPoints 实时OCR写入 " + JSON.stringify(points));
