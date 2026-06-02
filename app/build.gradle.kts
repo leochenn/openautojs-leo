@@ -1,5 +1,6 @@
 import java.util.*
 import java.io.File
+import java.text.SimpleDateFormat
 
 plugins {
     id("com.android.application")
@@ -17,6 +18,25 @@ val properties = Properties()
 if (propFile.exists()) {
     propFile.inputStream().reader().use {
         properties.load(it)
+    }
+}
+
+val apkBuildStamp: String = System.getenv("OPENAUTOJS_BUILD_STAMP")
+    ?: SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.US).format(Date())
+val escapedApkBuildStamp: String = apkBuildStamp
+    .replace("\\", "\\\\")
+    .replace("\"", "\\\"")
+val generatedBuildInfoAssetsDir = File(buildDir, "generated/apk_build_info_assets")
+val generateApkBuildInfoAssets by tasks.registering {
+    val outputFile = File(generatedBuildInfoAssetsDir, "automation_scripts/build_info.json")
+    inputs.property("apkBuildStamp", apkBuildStamp)
+    outputs.file(outputFile)
+    doLast {
+        outputFile.parentFile.mkdirs()
+        outputFile.writeText(
+            """{"apkBuildStamp":"$escapedApkBuildStamp"}""",
+            Charsets.UTF_8
+        )
     }
 }
 
@@ -142,6 +162,7 @@ android {
     sourceSets {
         getByName("main") {
             res.srcDirs("src/main/res", "src/main/res-i18n")
+            assets.srcDir(generatedBuildInfoAssetsDir)
             jniLibs.srcDirs("/libs")
         }
     }
@@ -164,6 +185,12 @@ android {
         )
     }
 
+}
+
+tasks.matching { task ->
+    task.name.startsWith("merge") && task.name.contains("Assets", ignoreCase = true)
+}.configureEach {
+    dependsOn(generateApkBuildInfoAssets)
 }
 
 dependencies {

@@ -320,7 +320,8 @@ var runtime = {
     captchaStats: null,
     captchaSolver: null,
     logBuffer: [],
-    useBufferedLog: false
+    useBufferedLog: false,
+    apkBuildInfo: null
 };
 
 // ==================== 日志模块 ====================
@@ -624,6 +625,40 @@ function currentScriptDir() {
         if (idx > 0) return path.substring(0, idx);
     } catch (ignored) {}
     return "";
+}
+
+function loadApkBuildInfo() {
+    var candidates = [];
+    addUniquePath(candidates, joinLocalPath(currentScriptDir(), "build_info.json"));
+    try {
+        addUniquePath(candidates, joinLocalPath(files.cwd(), "build_info.json"));
+    } catch (ignoredCwd) {}
+    addUniquePath(candidates, "build_info.json");
+    addUniquePath(candidates, "project/build_info.json");
+
+    for (var i = 0; i < candidates.length; i++) {
+        var path = candidates[i];
+        try {
+            if (!files.exists(path)) continue;
+            var info = JSON.parse(files.read(path));
+            return {
+                apkBuildStamp: info && info.apkBuildStamp ? String(info.apkBuildStamp) : "unknown",
+                path: path
+            };
+        } catch (e) {
+            return {
+                apkBuildStamp: "unknown",
+                path: path,
+                error: String(e)
+            };
+        }
+    }
+    return {
+        apkBuildStamp: "unknown",
+        path: "",
+        error: "build_info.json not found",
+        candidates: candidates.join("|")
+    };
 }
 
 function resolveCaptchaModulePath() {
@@ -3456,6 +3491,11 @@ function initRuntime() {
     try {
         files.remove(runtime.latestLogPath);
     } catch (ignored) {}
+    runtime.apkBuildInfo = loadApkBuildInfo();
+    logx("INIT", "APK_BUILD_STAMP=" + runtime.apkBuildInfo.apkBuildStamp +
+        " buildInfoPath=" + (runtime.apkBuildInfo.path || "") +
+        (runtime.apkBuildInfo.error ? " error=" + runtime.apkBuildInfo.error : "") +
+        (runtime.apkBuildInfo.candidates ? " candidates=" + runtime.apkBuildInfo.candidates : ""));
     logx("INIT", "脚本启动 version=" + CONFIG.version);
     logx("INIT", "配置=" + JSON.stringify(CONFIG));
     logx("INIT", "屏幕=" + device.width + "x" + device.height);

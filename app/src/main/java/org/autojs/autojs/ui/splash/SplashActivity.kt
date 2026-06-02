@@ -28,6 +28,7 @@ import kotlinx.coroutines.launch
 import org.autojs.autojs.ui.compose.theme.AutoXJsTheme
 import org.autojs.autojs.ui.beginner.BeginnerHomeActivity
 import org.openautojs.autojs.R
+import org.json.JSONObject
 
 /**
  * Created by Stardust on 2017/7/7.
@@ -64,6 +65,7 @@ class SplashActivity : ComponentActivity() {
     }
 
     private fun init() {
+        val apkBuildStamp = readApkBuildStamp()
         setContent {
             AutoXJsTheme {
                 Surface(color = MaterialTheme.colorScheme.surface) {
@@ -88,14 +90,23 @@ class SplashActivity : ComponentActivity() {
                                 modifier = Modifier.size(120.dp),
                             )
                         }
-                        Text(
-                            text = stringResource(id = R.string.powered_by_autojs),
-                            color = Color(0xdd000000),
-                            fontSize = 14.sp,
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier
                                 .padding(12.dp)
                                 .align(Alignment.CenterHorizontally)
-                        )
+                        ) {
+                            Text(
+                                text = stringResource(id = R.string.powered_by_autojs),
+                                color = Color(0xdd000000),
+                                fontSize = 14.sp
+                            )
+                            Text(
+                                text = "Build $apkBuildStamp",
+                                color = Color(0x99000000),
+                                fontSize = 12.sp
+                            )
+                        }
                         Spacer(
                             modifier = Modifier
                                 .windowInsetsBottomHeight(WindowInsets.navigationBars)
@@ -103,6 +114,16 @@ class SplashActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    private fun readApkBuildStamp(): String {
+        return try {
+            assets.open("automation_scripts/build_info.json").bufferedReader().use { reader ->
+                JSONObject(reader.readText()).optString("apkBuildStamp", "unknown")
+            }
+        } catch (e: Exception) {
+            "unknown"
         }
     }
 
@@ -131,6 +152,6 @@ class SplashActivity : ComponentActivity() {
 
     companion object {
         private val LOG_TAG = SplashActivity::class.java.simpleName
-        private const val INIT_TIMEOUT: Long = 800
+        private const val INIT_TIMEOUT: Long = 1500
     }
 }
