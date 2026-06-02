@@ -445,6 +445,11 @@ function vibrateManualFallback(reason) {
     try { device.vibrate(500); } catch (ignored) {}
 }
 
+function vibrateScriptEnd(reason) {
+    logx("ALERT", "脚本结束震动提醒 reason=" + (reason || ""));
+    try { device.vibrate(500); } catch (ignored) {}
+}
+
 function diagnosticPath(name, ext) {
     return CONFIG.outputDir + "/" + name + "_" + fileTimeText() + "." + ext;
 }
@@ -2789,6 +2794,7 @@ function getMinorPointsForRush() {
     }
     var minorRows = collectMinorCredentialRowPointsBelowCurrentTitle("minor-rush", CONFIG.minorVisitorCount);
     if (minorRows.length < CONFIG.minorVisitorCount) {
+        vibrateManualFallback("minor_rush_credential_rows_insufficient rows=" + minorRows.length + " need=" + CONFIG.minorVisitorCount);
         fail("第二轮未成年人标题下方证件行不足，停止点击未成年人，避免误点成年人行");
     }
     var points = minorSelectPointsFromCredentialPoints(minorRows, CONFIG.minorVisitorCount);
@@ -3238,6 +3244,7 @@ function rushFlow() {
 
     // 等待"参观日期"被选中的状态背景色出现，最多2秒；未出现则说明加载异常，中断流程
     if (!waitBookingListSentinelGone(bookingListSentinel)) {
+        vibrateManualFallback("booking_list_sentinel_not_gone");
         flushLogBuffer();
         return { ok: false, pageLoadTimeout: true, reason: "参观预约列表未离开" };
     }
@@ -3271,10 +3278,11 @@ function rushFlow() {
     var elapsed = Date.now() - pageLoadDetectStart;
     
     if (!pageLoadDetected) {
-        flushLogBuffer();
         var timeoutAvgCost = loopCount > 0 ? Math.round(dateGridDetectTotalCost / loopCount) : 0;
         var timeoutAvgCaptureCost = loopCount > 0 ? Math.round(dateGridCaptureTotalCost / loopCount) : 0;
         logx("RUSH", "日期网格选中色块未在2秒内出现，中断流程 elapsed=" + elapsed + "ms loopCount=" + loopCount + " algoTotalCost=" + dateGridDetectTotalCost + "ms algoAvgCost=" + timeoutAvgCost + "ms algoMaxCost=" + dateGridDetectMaxCost + "ms captureTotalCost=" + dateGridCaptureTotalCost + "ms captureAvgCost=" + timeoutAvgCaptureCost + "ms captureMaxCost=" + dateGridCaptureMaxCost + "ms lastProbe=" + JSON.stringify(lastDateGridProbe));
+        vibrateManualFallback("date_grid_selected_timeout elapsed=" + elapsed + "ms");
+        flushLogBuffer();
         return { ok: false, pageLoadTimeout: true, reason: "日期网格选中色块未出现 elapsed=" + elapsed + "ms" };
     }
     
@@ -3463,6 +3471,7 @@ function main() {
         flushLogBuffer(); // 确保所有缓冲日志写入
         saveCache();
         logx("END", "日志路径=" + runtime.logPath + " 缓存路径=" + runtime.cachePath);
+        vibrateScriptEnd(failed ? "failed" : "completed");
         finalNotifyUser((failed ? "异常日志已写入：" : "日志已写入：") + runtime.logPath);
     }
 }
