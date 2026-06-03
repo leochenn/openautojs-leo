@@ -471,6 +471,7 @@
         <activity android:name="org.autojs.autojs.ui.build.ProjectConfigActivity_" />
         <activity android:name="org.autojs.autojs.ui.log.LogActivityKt" />
         <activity android:name="org.autojs.autojs.ui.logupload.LogUploadActivity" />
+        <activity android:name="org.autojs.autojs.ui.usermanual.UserManualActivity" />
         <activity android:name="org.autojs.autojs.ui.shortcut.ShortcutIconSelectActivity_" />
         <activity android:name="org.autojs.autojs.ui.timing.TimedTaskSettingActivity_" />
         <activity

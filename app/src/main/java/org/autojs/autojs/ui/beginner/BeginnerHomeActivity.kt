@@ -75,6 +75,7 @@ import org.autojs.autojs.ui.compose.theme.AutoXJsTheme
 import org.autojs.autojs.ui.main.MainActivity
 import org.autojs.autojs.ui.main.rememberExternalStoragePermissionsState
 import org.autojs.autojs.ui.logupload.LogUploadActivity
+import org.autojs.autojs.ui.usermanual.UserManualActivity
 import org.autojs.autojs.ui.settings.InputMethodGuideActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -117,6 +118,9 @@ class BeginnerHomeActivity : ComponentActivity() {
                         },
                         openLogUpload = {
                             startActivity(Intent(this, LogUploadActivity::class.java))
+                        },
+                        openUserManual = {
+                            startActivity(Intent(this, UserManualActivity::class.java))
                         }
                     )
                 }
@@ -135,7 +139,8 @@ private fun BeginnerHomeScreen(
     refreshTick: Int,
     initialConfig: BookingConfig,
     openAdvancedMode: () -> Unit,
-    openLogUpload: () -> Unit
+    openLogUpload: () -> Unit,
+    openUserManual: () -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -480,6 +485,10 @@ private fun BeginnerHomeScreen(
             onLogUpload = {
                 showSettingsDialog = false
                 openLogUpload()
+            },
+            onUserManual = {
+                showSettingsDialog = false
+                openUserManual()
             }
         )
     }
@@ -588,7 +597,8 @@ private fun BeginnerHomeScreen(
 private fun SettingsDialog(
     onDismissRequest: () -> Unit,
     onAdvancedMode: () -> Unit,
-    onLogUpload: () -> Unit
+    onLogUpload: () -> Unit,
+    onUserManual: () -> Unit
 ) {
     Dialog(onDismissRequest = onDismissRequest) {
         Surface(
@@ -632,6 +642,18 @@ private fun SettingsDialog(
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = AppPrimary)
                 ) {
                     Text(text = "上传日志")
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                OutlinedButton(
+                    onClick = onUserManual,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = ButtonShape,
+                    border = BorderStroke(1.dp, AppPrimary.copy(alpha = 0.55f)),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = AppPrimary)
+                ) {
+                    Text(text = "使用手册")
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))

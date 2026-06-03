@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>使用手册</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+            font-size: 16px;
+            line-height: 1.8;
+            color: #282C2F;
+            background: #F5F5F5;
+            padding: 16px;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        h1 {
+            font-size: 24px;
+            color: #009688;
+            text-align: center;
+            margin-bottom: 8px;
+            padding: 20px 0 8px;
+        }
+        .subtitle {
+            text-align: center;
+            color: #9DA0A2;
+            font-size: 14px;
+            margin-bottom: 24px;
+        }
+        h2 {
+            font-size: 20px;
+            color: #009688;
+            margin: 28px 0 12px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #009688;
+        }
+        h3 {
+            font-size: 17px;
+            color: #282C2F;
+            margin: 20px 0 8px;
+        }
+        p {
+            margin-bottom: 12px;
+        }
+        .card {
+            background: #FFFFFF;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+        .step {
+            display: flex;
+            align-items: flex-start;
+            margin-bottom: 16px;
+        }
+        .step-num {
+            flex-shrink: 0;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: #009688;
+            color: #FFFFFF;
+            font-weight: bold;
+            font-size: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 12px;
+            margin-top: 2px;
+        }
+        .step-content {
+            flex: 1;
+        }
+        .step-title {
+            font-weight: bold;
+            font-size: 16px;
+            color: #282C2F;
+            margin-bottom: 4px;
+        }
+        .step-desc {
+            color: #555;
+            font-size: 15px;
+        }
+        .highlight {
+            background: #E0F2F1;
+            padding: 12px 16px;
+            border-radius: 6px;
+            border-left: 4px solid #009688;
+            margin: 12px 0;
+            font-size: 15px;
+        }
+        .warning {
+            background: #FFF3E0;
+            padding: 12px 16px;
+            border-radius: 6px;
+            border-left: 4px solid #FF9800;
+            margin: 12px 0;
+            font-size: 15px;
+        }
+        .danger {
+            background: #FFEBEE;
+            padding: 12px 16px;
+            border-radius: 6px;
+            border-left: 4px solid #F44336;
+            margin: 12px 0;
+            font-size: 15px;
+        }
+        .tip-icon {
+            font-weight: bold;
+            margin-right: 4px;
+        }
+        ul, ol {
+            padding-left: 24px;
+            margin-bottom: 12px;
+        }
+        li {
+            margin-bottom: 6px;
+        }
+        .toc {
+            background: #FFFFFF;
+            border-radius: 8px;
+            padding: 16px 20px;
+            margin-bottom: 24px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+        .toc-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: #009688;
+            margin-bottom: 12px;
+        }
+        .toc a {
+            display: block;
+            color: #009688;
+            text-decoration: none;
+            padding: 6px 0;
+            font-size: 15px;
+            border-bottom: 1px solid #F2F3F5;
+        }
+        .toc a:last-child {
+            border-bottom: none;
+        }
+        .faq-q {
+            font-weight: bold;
+            color: #282C2F;
+            margin-bottom: 4px;
+            font-size: 16px;
+        }
+        .faq-a {
+            color: #555;
+            margin-bottom: 16px;
+            padding-left: 12px;
+            border-left: 3px solid #E0E0E0;
+            font-size: 15px;
+        }
+        .status-ok { color: #009688; font-weight: bold; }
+        .status-fail { color: #F44336; font-weight: bold; }
+        .btn-label {
+            display: inline-block;
+            background: #009688;
+            color: #FFFFFF;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: bold;
+        }
+        .screen-name {
+            display: inline-block;
+            background: #E8E8E8;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+
+<h1>使用手册</h1>
+<p class="subtitle">南京大屠杀纪念馆预约抢票助手</p>
+
+<!-- 目录 -->
+<div class="toc">
+    <div class="toc-title">目录</div>
+    <a href="#section1">一、安装与启动</a>
+    <a href="#section2">二、权限配置（首次使用必看）</a>
+    <a href="#section3">三、抢票参数配置</a>
+    <a href="#section4">四、抢票操作流程</a>
+    <a href="#section5">五、验证码处理</a>
+    <a href="#section6">六、查看运行日志</a>
+    <a href="#section7">七、常见问题</a>
+    <a href="#section8">八、注意事项</a>
+</div>
+
+<!-- 第一章 -->
+<h2 id="section1">一、安装与启动</h2>
+
+<div class="card">
+    <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+            <div class="step-title">安装 APP</div>
+            <div class="step-desc">
+                将收到的 APK 安装包安装到手机上。如果手机提示"未知来源应用"，请允许安装。
+            </div>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+            <div class="step-title">打开 APP</div>
+            <div class="step-desc">
+                安装完成后，在桌面找到 APP 图标，点击打开。首次打开会看到<span class="screen-name">配置首页</span>。
+            </div>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+            <div class="step-title">检查首页状态</div>
+            <div class="step-desc">
+                首页顶部有状态卡片，显示各项配置是否就绪。全部显示绿色勾号后才能正常抢票。
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 第二章 -->
+<h2 id="section2">二、权限配置（首次使用必看）</h2>
+
+<p>首次使用需要配置三项权限，<strong>缺一不可</strong>。首页的状态卡片会实时显示每项是否就绪。</p>
+
+<div class="card">
+    <h3>1. 存储权限</h3>
+    <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+            <div class="step-title">点击"授权"</div>
+            <div class="step-desc">
+                在首页<span class="screen-name">存储权限</span>卡片中，点击右侧的 <span class="btn-label">授权</span> 按钮。
+            </div>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+            <div class="step-title">允许权限</div>
+            <div class="step-desc">
+                系统弹出权限请求窗口，点击"允许"。如果手机没有弹出，请手动到 系统设置 → 应用 → 找到本APP → 权限 → 开启"存储"权限。
+            </div>
+        </div>
+    </div>
+    <div class="highlight">
+        <span class="tip-icon">提示：</span>Android 11 及以上手机，需要额外允许"管理所有文件"权限。
+    </div>
+</div>
+
+<div class="card">
+    <h3>2. 无障碍服务</h3>
+    <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+            <div class="step-title">点击"开启"</div>
+            <div class="step-desc">
+                在首页<span class="screen-name">无障碍服务</span>卡片中，点击右侧的 <span class="btn-label">开启</span> 按钮，系统会跳转到无障碍设置页面。
+            </div>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+            <div class="step-title">找到并开启服务</div>
+            <div class="step-desc">
+                在无障碍设置页面中，找到本 APP 对应的服务（名称中包含"AutoJS"或"自动化"），点击进入后打开开关。
+            </div>
+        </div>
+    </div>
+    <div class="warning">
+        <span class="tip-icon">注意：</span>部分手机（如小米、华为、OPPO、vivo）会弹出安全确认框，请点击"确定"或"允许"。有些手机需要先在"更多已下载的服务"中找到。
+    </div>
+    <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+            <div class="step-title">返回 APP</div>
+            <div class="step-desc">
+                按手机返回键回到 APP 首页，确认<span class="screen-name">无障碍服务</span>卡片显示 <span class="status-ok">已开启</span>。
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <h3>3. 验证码输入法</h3>
+    <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+            <div class="step-title">点击"去设置"</div>
+            <div class="step-desc">
+                在首页<span class="screen-name">验证码输入法</span>卡片中，点击右侧的 <span class="btn-label">去设置</span> 按钮，跳转到系统输入法设置页面。
+            </div>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+            <div class="step-title">启用输入法</div>
+            <div class="step-desc">
+                在输入法列表中找到本 APP 的输入法（名称中包含"验证码"或"Captcha"），打开开关启用它。
+            </div>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+            <div class="step-title">设为默认输入法</div>
+            <div class="step-desc">
+                返回 APP 后，如果卡片显示"未选为默认"，点击 <span class="btn-label">去切换</span> 按钮，在弹出的输入法选择框中选择本 APP 的输入法。
+            </div>
+        </div>
+    </div>
+    <div class="highlight">
+        <span class="tip-icon">提示：</span>验证码输入法只在抢票过程中自动使用，不影响平时打字。抢票结束后可以切回原来的输入法。
+    </div>
+</div>
+
+<div class="card">
+    <h3>4. 验证码校准（可选但推荐）</h3>
+    <p>验证码校准可以提高验证码识别的准确率。在首页<span class="screen-name">验证码校准</span>卡片中：</p>
+    <ul>
+        <li>如果尚未校准，点击 <span class="btn-label">去校准</span> 进入校准界面，按照提示完成校准操作</li>
+        <li>如果已经校准过，点击 <span class="btn-label">查看</span> 可以查看当前校准参数</li>
+    </ul>
+</div>
+
+<!-- 第三章 -->
+<h2 id="section3">三、抢票参数配置</h2>
+
+<p>在首页下方的<span class="screen-name">预约配置</span>区域，设置抢票相关参数：</p>
+
+<div class="card">
+    <h3>基本配置</h3>
+    <ul>
+        <li><strong>预约日期</strong>：选择要抢的日期。通常选择明天或后天（纪念馆提前1-2天放票）</li>
+        <li><strong>预约时段</strong>：选择想去的时段（如上午场、下午场）。可以多选，系统会按顺序尝试</li>
+        <li><strong>展馆</strong>：选择要参观的展馆</li>
+        <li><strong>预约模式</strong>：普通预约或亲子预约</li>
+    </ul>
+</div>
+
+<div class="card">
+    <h3>观众信息</h3>
+    <ul>
+        <li><strong>成年人信息</strong>：填写姓名和身份证号。每个成年人占一个名额</li>
+        <li><strong>未成年人信息</strong>（亲子模式）：填写未成年人姓名和身份证号</li>
+    </ul>
+    <div class="warning">
+        <span class="tip-icon">注意：</span>身份证号必须准确，预约时会直接提交。信息仅保存在本机，不会上传到任何服务器。
+    </div>
+</div>
+
+<div class="card">
+    <h3>高级选项</h3>
+    <ul>
+        <li><strong>开抢时间</strong>：设置放票的具体时间（如 10:00:00），系统会在该时间点准时发起抢票</li>
+        <li><strong>提前进入</strong>：设置提前多少秒进入微信小程序准备（建议提前 5-10 秒）</li>
+        <li><strong>重试次数</strong>：抢票失败后的重试次数</li>
+    </ul>
+</div>
+
+<!-- 第四章 -->
+<h2 id="section4">四、抢票操作流程</h2>
+
+<div class="card">
+    <h3>完整抢票步骤</h3>
+    <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+            <div class="step-title">确认所有权限已开启</div>
+            <div class="step-desc">
+                检查首页状态卡片，确保存储权限、无障碍服务、验证码输入法全部显示 <span class="status-ok">已就绪</span>。
+            </div>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+            <div class="step-title">填写预约配置</div>
+            <div class="step-desc">
+                按第三章说明，设置好日期、时段、展馆和观众信息。
+            </div>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+            <div class="step-title">将微信小程序添加到桌面快捷方式</div>
+            <div class="step-desc">
+                打开微信，进入南京大屠杀纪念馆预约小程序，点击小程序右上角的 <strong>···</strong> 按钮，选择"添加到桌面"。这样桌面上会出现小程序的快捷图标。<br>
+                <strong>这一步必须做</strong>，因为抢票时需要通过桌面快捷方式快速启动小程序。
+            </div>
+        </div>
+    </div>
+    <div class="danger">
+        <span class="tip-icon">必须：</span>如果桌面没有小程序快捷方式，抢票无法正常启动！请务必提前创建。
+    </div>
+    <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-content">
+            <div class="step-title">杀死小程序进程</div>
+            <div class="step-desc">
+                在点击抢票之前，<strong>必须先关闭小程序</strong>。操作方法：<br>
+                &bull; 打开手机的多任务/最近任务界面（通常是从底部上滑并停顿）<br>
+                &bull; 找到微信或小程序的卡片，向上滑动将其关闭<br>
+                &bull; 确保小程序已被完全关闭，不要留在后台运行
+            </div>
+        </div>
+    </div>
+    <div class="warning">
+        <span class="tip-icon">注意：</span>如果小程序还在后台运行，抢票时可能无法正确进入小程序页面，导致抢票失败。每次抢票前务必先杀死小程序进程！
+    </div>
+    <div class="step">
+        <div class="step-num">5</div>
+        <div class="step-content">
+            <div class="step-title">回到 APP 点击"开始抢票"</div>
+            <div class="step-desc">
+                按返回键回到本 APP，点击首页的 <span class="btn-label">开始抢票</span> 按钮。系统会自动执行以下流程：
+                <ol style="margin-top:8px">
+                    <li>通过桌面快捷方式启动小程序</li>
+                    <li>预热阶段：采集页面坐标信息并缓存</li>
+                    <li>等待开抢时间</li>
+                    <li>准时发起抢票：自动点击日期、时段、填写信息、提交</li>
+                    <li>处理验证码（如有）</li>
+                    <li>返回抢票结果</li>
+                </ol>
+            </div>
+        </div>
+    </div>
+    <div class="step">
+        <div class="step-num">6</div>
+        <div class="step-content">
+            <div class="step-title">查看结果</div>
+            <div class="step-desc">
+                抢票完成后，APP 会显示结果通知。如果成功，会提示"预约成功"；如果失败，会显示失败原因。
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="highlight">
+    <span class="tip-icon">重要提示：</span>抢票过程中，<strong>请不要操作手机</strong>，不要切换到其他应用，不要锁屏。让手机保持亮屏状态，直到看到抢票结果。
+</div>
+
+<!-- 第五章 -->
+<h2 id="section5">五、验证码处理</h2>
+
+<p>抢票提交时可能会弹出验证码，APP 会自动处理两种类型的验证码：</p>
+
+<div class="card">
+    <h3>1. 数学题验证码</h3>
+    <p>页面显示一道数学计算题（如"3 + 5 = ?"），APP 会自动：</p>
+    <ol>
+        <li>截图识别题目文字</li>
+        <li>计算出答案</li>
+        <li>通过自定义输入法自动填入答案</li>
+        <li>点击确认提交</li>
+    </ol>
+    <div class="warning">
+        <span class="tip-icon">注意：</span>数学验证码<strong>可能识别失败或计算错误</strong>，常见情况：<br>
+        &bull; <strong>识别不到题目</strong>：截图模糊或验证码样式变化，导致无法读出算式<br>
+        &bull; <strong>识别错误</strong>：数字看错（如 6 看成 8），导致计算结果不对<br><br>
+        如果自动识别失败或填入的答案不对，<strong>你需要手动介入</strong>：<br>
+        &bull; 先切回你常用的输入法（长按输入框切换）<br>
+        &bull; 手动清空错误答案，输入正确答案<br>
+        &bull; 点击确认提交验证码<br>
+        &bull; 完成后 APP 会继续后续流程
+    </div>
+    <div class="highlight">
+        <span class="tip-icon">提示：</span>抢票时请留意手机屏幕，如果看到验证码答案明显不对（如填入了乱码或空值），请立即手动修正，不要干等！
+    </div>
+</div>
+
+<div class="card">
+    <h3>2. 滑块验证码</h3>
+    <p>页面显示一个滑块拼图，APP 会自动：</p>
+    <ol>
+        <li>截图识别滑块位置</li>
+        <li>计算滑动距离</li>
+        <li>模拟人类滑动轨迹（先快后慢）</li>
+        <li>完成滑块验证</li>
+    </ol>
+    <div class="warning">
+        <span class="tip-icon">注意：</span>滑块验证码偶尔可能识别不准，如果失败，APP 会自动重试。如果多次失败，可以手动完成滑块验证后让 APP 继续后续流程。
+    </div>
+</div>
+
+<!-- 第六章 -->
+<h2 id="section6">六、查看运行日志</h2>
+
+<div class="card">
+    <p>每次抢票运行都会产生详细日志，记录每一步的操作和结果。</p>
+    <h3>查看方式</h3>
+    <ul>
+        <li>在首页点击右上角 <strong>设置</strong> → <strong>上传日志</strong>，可以查看、上传或删除历史日志</li>
+        <li>日志文件保存在手机 <code>/sdcard/OpenAutoJS_NanjingBooking/</code> 目录下</li>
+        <li>每次运行产生一个以日期时间命名的文件夹</li>
+    </ul>
+    <h3>上传日志</h3>
+    <p>如果抢票遇到问题，可以上传日志给开发者排查：</p>
+    <ol>
+        <li>进入"上传日志"页面</li>
+        <li>勾选要上传的日志（可多选）</li>
+        <li>点击"上传"按钮</li>
+    </ol>
+</div>
+
+<!-- 第七章 -->
+<h2 id="section7">七、常见问题</h2>
+
+<div class="card">
+    <div class="faq-q">Q1：首页状态显示"未开启"怎么办？</div>
+    <div class="faq-a">按照第二章的步骤，逐项开启存储权限、无障碍服务和验证码输入法。每项都有对应的按钮引导你到系统设置页面。</div>
+
+    <div class="faq-q">Q2：无障碍服务总是自动关闭？</div>
+    <div class="faq-a">部分手机（尤其是小米、华为）会自动关闭无障碍服务来省电。请到手机设置 → 电池优化 → 找到本APP → 选择"不优化"。同时在手机后台管理中锁定本APP，防止被清理。</div>
+
+    <div class="faq-q">Q3：抢票时提示"截图权限不足"？</div>
+    <div class="faq-a">截图权限（MediaProjection）需要每次使用时授权。APP 会在需要时自动请求，请在弹窗中点击"允许"。</div>
+
+    <div class="faq-q">Q4：抢票一直失败怎么办？</div>
+    <div class="faq-a">可能的原因和解决方法：<br>
+    &bull; 网络不稳定 → 切换到更稳定的 WiFi 或 4G/5G 网络<br>
+    &bull; 放票时间已过 → 确认放票时间，提前设置好等待<br>
+    &bull; 验证码识别失败 → 尝试重新校准验证码参数<br>
+    &bull; 小程序页面变化 → 联系开发者更新<br>
+    如果反复失败，请上传日志给开发者排查。</div>
+
+    <div class="faq-q">Q5：验证码输入法会不会影响我正常打字？</div>
+    <div class="faq-a">不会。验证码输入法只在抢票过程中自动切换使用，抢票结束后可以切回你原来的输入法。平时打字不受影响。</div>
+
+    <div class="faq-q">Q6：可以同时抢多个日期吗？</div>
+    <div class="faq-a">目前不支持同时抢多个日期。每次只能设置一个预约日期。如果需要抢多个日期，请先抢一个，完成后再修改日期抢下一个。</div>
+
+    <div class="faq-q">Q7：抢票过程中手机可以锁屏吗？</div>
+    <div class="faq-a">不可以。抢票过程需要手机保持亮屏状态，否则自动化操作可能中断。建议将手机屏幕超时设置为最长（如10分钟），或在抢票期间保持手机亮屏。</div>
+
+    <div class="faq-q">Q8：APP 会消耗很多流量吗？</div>
+    <div class="faq-a">不会。APP 本身不消耗流量，抢票过程中只在微信小程序内操作，流量消耗与手动操作相同。</div>
+
+    <div class="faq-q">Q9：个人信息安全吗？</div>
+    <div class="faq-a">所有个人信息（姓名、身份证号）仅保存在你的手机本地，不会上传到任何服务器。抢票时直接提交到纪念馆官方小程序，与手动填写提交方式相同。</div>
+</div>
+
+<!-- 第八章 -->
+<h2 id="section8">八、注意事项</h2>
+
+<div class="card">
+    <div class="danger">
+        <span class="tip-icon">重要：</span>本工具仅供个人正常预约使用，请遵守纪念馆的预约规则，不要用于任何违规操作。
+    </div>
+
+    <h3>抢票前检查清单</h3>
+    <ul>
+        <li>&#9744; 存储权限已开启</li>
+        <li>&#9744; 无障碍服务已开启</li>
+        <li>&#9744; 验证码输入法已启用并设为默认</li>
+        <li>&#9744; 预约日期、时段、展馆已填写</li>
+        <li>&#9744; 观众姓名和身份证号已填写</li>
+        <li>&#9744; 微信小程序快捷方式已添加到桌面</li>
+        <li>&#9744; 小程序进程已杀死（不在后台运行）</li>
+        <li>&#9744; 手机已连接稳定网络</li>
+        <li>&#9744; 手机屏幕保持亮屏</li>
+        <li>&#9744; 手机后台已锁定本APP（防止被系统清理）</li>
+    </ul>
+
+    <h3>抢票过程中</h3>
+    <ul>
+        <li>不要主动操作手机，但<strong>请留意屏幕</strong></li>
+        <li>如果弹出验证码且自动识别明显错误，立即手动修正答案</li>
+        <li>不要切换到其他应用</li>
+        <li>不要锁屏</li>
+        <li>保持网络连接</li>
+    </ul>
+
+    <h3>抢票后</h3>
+    <ul>
+        <li>如果成功，请在纪念馆官方小程序中确认预约信息</li>
+        <li>如果失败，可以查看日志分析原因，调整参数后重试</li>
+        <li>记得切回原来的输入法（如果验证码输入法仍为默认）</li>
+    </ul>
+</div>
+
+</div>
+</body>
+</html>
